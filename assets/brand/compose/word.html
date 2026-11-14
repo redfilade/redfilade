@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@font-face{font-family:FRB;src:url(fredoka-latin-700-normal.woff2)}
+@font-face{font-family:NUN;src:url(nunito-latin-800-normal.woff2)}
+html,body{margin:0;overflow:hidden}
+#s{position:relative;background-size:cover}
+.word{position:absolute;font-family:FRB;letter-spacing:-.005em;line-height:1;white-space:nowrap;font-feature-settings:'liga' 0}
+.red{background:linear-gradient(180deg,#FF8A86 0%,#F2484B 42%,#C8232C 100%);-webkit-background-clip:text;color:transparent;
+ filter:drop-shadow(0 2px 0 #B01E27) drop-shadow(0 2px 0 #A11B23) drop-shadow(0 2px 0 #921820) drop-shadow(0 2px 0 #84151C) drop-shadow(0 2px 0 #6E1217) drop-shadow(0 14px 22px rgba(229,56,59,.5))}
+.cream{background:linear-gradient(180deg,#FFFFFF 0%,#F7F1E8 45%,#D9D1C4 100%);-webkit-background-clip:text;color:transparent;
+ filter:drop-shadow(0 2px 0 #BDB4A6) drop-shadow(0 2px 0 #A9A092) drop-shadow(0 2px 0 #958C7F) drop-shadow(0 2px 0 #81796C) drop-shadow(0 2px 0 #635C52) drop-shadow(0 14px 22px rgba(0,0,0,.55))}
+.tag{position:absolute;font-family:NUN;color:#E9E3D9;letter-spacing:.2em;text-transform:uppercase;white-space:nowrap}
+.tag b{color:#F2484B;font-weight:inherit}
+</style></head><body><div id="s"></div>
+<script>
+const q=new URLSearchParams(location.search), m=q.get('mode');
+const L={social:{W:1280,H:640,bg:'bg_social.png',x:610,y:205,fs:138,ts:27,ty:395},
+         banner:{W:1600,H:520,bg:'bg_banner.png',x:690,y:140,fs:168,ts:33,ty:350}}[m];
+const s=document.getElementById('s'); s.style.width=L.W+'px'; s.style.height=L.H+'px'; s.style.backgroundImage=`url(${L.bg})`;
+s.innerHTML=`<div class="word" style="left:${L.x}px;top:${L.y}px;font-size:${L.fs}px"><span class="red">Red</span><span class="cream">filade</span></div>
+<div class="tag" style="left:${L.x+L.fs*0.03}px;top:${L.ty}px;font-size:${L.ts}px">Open MCP <b>red-team</b> range</div>`;
+</script></body></html>

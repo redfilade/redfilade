@@ -106,7 +106,7 @@ Every report states which level ran, the verdict per scenario, **what could not 
 
 ```text
 .github/            CI (untrusted lane), release (trusted lane), CODEOWNERS, ruleset
-assets/brand/       Logo (3D renders and flat vectors) and the scripts that build them
+assets/brand/       Mascot artwork, banner, avatar and flat vector logo, plus their build scripts
 cmd/redfilade/      CLI (Go)
 internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery
 scenarios/          Range scenarios: data-only manifests (ADR-0013)

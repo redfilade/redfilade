@@ -1,6 +1,6 @@
 """Build the flat (2D) Redfilade brand assets. Run: python3 assets/brand/build.py
 
-The 3D banner, social preview and avatar PNGs come from 3d/render.sh instead.
+The mascot banner, social preview and avatar PNGs come from compose/build.sh instead.
 
 Needs fontTools, rsvg-convert and Inter Display installed.
 
