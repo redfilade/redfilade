@@ -62,7 +62,9 @@ jobs:
       # Go: control plane and runner (ADR-003)
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          # Latest patch of the newest Go release, so the standard library has every
+          # security fix. go.mod sets the minimum (1.26). Renovate tracks this line.
+          go-version: "1.27.x"
           cache: false
       - name: Go vet, build and test (module graph is read-only)
         env:

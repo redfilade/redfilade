@@ -16,12 +16,12 @@ jobs:
     if: github.event_name == 'pull_request'
     uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932 # v2.7.1
     with:
-      # Fork PRs get a read-only token, so results stay in the job log.
+      # Results stay in the job log for PRs; fork PRs could not upload them anyway.
       upload-sarif: false
     permissions:
-      actions: read          # reusable workflow reads run metadata
-      contents: read         # read lockfiles
-      security-events: read  # fork PRs cannot upload results
+      actions: read            # reusable workflow reads run metadata
+      contents: read           # read lockfiles
+      security-events: write   # required by the called workflow; GitHub makes it read-only for forks
 
   scan-main:
     name: osv-scan-main
