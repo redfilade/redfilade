@@ -12,11 +12,16 @@ cp "$HERE/scene.html" "$WORK/"
 mkdir -p "$WORK/fonts"
 cp "$WORK/node_modules/@fontsource/fredoka/files/fredoka-latin-700-normal.woff2" \
    "$WORK/node_modules/@fontsource/nunito/files/nunito-latin-800-normal.woff2" "$WORK/fonts/"
-(cd "$WORK" && python3 -m http.server 8765 --bind 127.0.0.1 >/dev/null 2>&1) & SRV=$!
-sleep 1
+# Serve on a free port with no subshell, so the server is always stopped on exit.
+PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WORK" >/dev/null 2>&1 & SRV=$!
+for _ in $(seq 1 50); do curl -sf "http://127.0.0.1:$PORT/scene.html" >/dev/null && break; sleep 0.1; done
+curl -sf "http://127.0.0.1:$PORT/scene.html" | grep -q 'id="stage"' || { echo "scene server not serving scene.html" >&2; exit 1; }
 shot() { google-chrome --headless=new --no-sandbox --hide-scrollbars --use-angle=swiftshader \
   --enable-unsafe-swiftshader --virtual-time-budget=8000 --window-size="$2,$3" \
-  --screenshot="$OUT/$4" "http://127.0.0.1:8765/scene.html?mode=$1" 2>/dev/null; }
+  --screenshot="$OUT/$4" "http://127.0.0.1:$PORT/scene.html?mode=$1" 2>/dev/null
+  # Guard: a real render is large; an error page is tiny.
+  [ "$(wc -c < "$OUT/$4")" -gt 150000 ] || { echo "render of $4 looks wrong (too small)" >&2; exit 1; }; }
 shot banner 1600 520 redfilade-banner-1600x520.png
 shot social 1280 640 redfilade-social-1280x640.png
 shot avatar 1024 1024 redfilade-avatar-1024.png
