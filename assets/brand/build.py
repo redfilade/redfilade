@@ -1,4 +1,6 @@
-"""Build the Redfilade brand assets (SVG + PNG). Run: python3 assets/brand/build.py
+"""Build the flat (2D) Redfilade brand assets. Run: python3 assets/brand/build.py
+
+The 3D banner, social preview and avatar PNGs come from 3d/render.sh instead.
 
 Needs fontTools, rsvg-convert and Inter Display installed.
 
@@ -99,7 +101,6 @@ png(p, "redfilade-mark-512.png", 512)
 avatar = f'<rect width="512" height="512" fill="{INK}"/>' \
          f'<g transform="translate(36 30) scale(.86)">{mark()}</g>'
 p = write("redfilade-avatar.svg", svg(512, 512, avatar, "Redfilade"))
-png(p, "redfilade-avatar-1024.png", 1024)
 
 
 # 3. Horizontal lockups, dark and light text variants
@@ -137,6 +138,5 @@ social = (f'<rect width="{W}" height="{H}" fill="{INK}"/>'
           f'<g transform="translate(564 380)"><path d="{tag1}" fill="{CREAM}"/></g>'
           f'<g transform="translate(564 440)"><path d="{tag2}" fill="{MUTED}"/></g>')
 p = write("redfilade-social.svg", svg(W, H, social, "Redfilade, the open MCP red-team range"))
-png(p, "redfilade-social-1280x640.png", W, H)
 
 print(sorted(os.listdir(OUT)))

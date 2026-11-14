@@ -1,0 +1,149 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+<style>
+@font-face{font-family:IDB;src:url(fonts/InterDisplay-Black.otf)}
+@font-face{font-family:IDS;src:url(fonts/InterDisplay-SemiBold.otf)}
+html,body{margin:0;padding:0;overflow:hidden;background:#070A10}
+#stage{position:relative;overflow:hidden}
+#bg{position:absolute;inset:0}
+canvas#gl{position:absolute;left:0;top:0}
+.word{position:absolute;font-family:IDB;letter-spacing:-.035em;line-height:1;white-space:nowrap}
+.word span{display:inline-block}
+.red{background:linear-gradient(180deg,#FF8A86 0%,#F2484B 42%,#C8232C 100%);-webkit-background-clip:text;color:transparent;
+ filter:drop-shadow(0 1px 0 #B01E27) drop-shadow(0 2px 0 #A11B23) drop-shadow(0 3px 0 #921820) drop-shadow(0 4px 0 #84151C) drop-shadow(0 5px 0 #741218) drop-shadow(0 10px 18px rgba(229,56,59,.45))}
+.cream{background:linear-gradient(180deg,#FFFFFF 0%,#F7F1E8 45%,#D9D1C4 100%);-webkit-background-clip:text;color:transparent;
+ filter:drop-shadow(0 1px 0 #BDB4A6) drop-shadow(0 2px 0 #A9A092) drop-shadow(0 3px 0 #958C7F) drop-shadow(0 4px 0 #81796C) drop-shadow(0 5px 0 #6D655A) drop-shadow(0 10px 18px rgba(0,0,0,.55))}
+.tag{position:absolute;font-family:IDS;color:#E9E3D9;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap}
+.tag b{color:#F2484B;font-weight:inherit}
+</style></head>
+<body><div id="stage"><canvas id="bg"></canvas><canvas id="gl"></canvas><div id="txt"></div></div>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const q = new URLSearchParams(location.search);
+const mode = q.get('mode') || 'social';
+const SIZES = { social:[1280,640], avatar:[1024,1024], banner:[1600,520], mark:[1024,1024] };
+const [W,H] = SIZES[mode];
+const stage = document.getElementById('stage'); stage.style.width=W+'px'; stage.style.height=H+'px';
+
+// ---------- 2D backdrop: deep navy, red glow, perspective "range" grid ----------
+const bg = document.getElementById('bg'); bg.width=W; bg.height=H; const c=bg.getContext('2d');
+if (mode !== 'mark') {
+  let g=c.createLinearGradient(0,0,0,H); g.addColorStop(0,'#0B1020'); g.addColorStop(1,'#05070C'); c.fillStyle=g; c.fillRect(0,0,W,H);
+  const SQ = (mode==='social'||mode==='banner') ? H : W; const GL_LEFT = mode==='social'? 30 : mode==='banner'? 150 : 0;
+  const gx = GL_LEFT + SQ/2, gy = H*0.46;
+  g=c.createRadialGradient(gx,gy,0,gx,gy,Math.max(W,H)*0.55); g.addColorStop(0,'rgba(229,56,59,.30)'); g.addColorStop(.35,'rgba(229,56,59,.08)'); g.addColorStop(1,'rgba(229,56,59,0)');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  // perspective floor grid
+  const hy=H*0.66, vx=gx; c.lineWidth=1;
+  for(let i=-30;i<=30;i++){ const x=vx+i*W*0.06; c.strokeStyle=`rgba(242,72,75,${0.10-Math.abs(i)*0.002})`;
+    c.beginPath(); c.moveTo(vx+i*6,hy); c.lineTo(x*1.0+(x-vx)*2.2,H); c.stroke(); }
+  for(let k=0;k<14;k++){ const t=Math.pow(k/13,2.1); const y=hy+(H-hy)*t; c.strokeStyle=`rgba(242,72,75,${0.03+0.10*t})`;
+    c.beginPath(); c.moveTo(0,y); c.lineTo(W,y); c.stroke(); }
+  // fade grid into horizon
+  g=c.createLinearGradient(0,hy-4,0,hy+70); g.addColorStop(0,'rgba(8,11,20,1)'); g.addColorStop(1,'rgba(8,11,20,0)'); c.fillStyle=g; c.fillRect(0,hy-4,W,74);
+  // radar rings around the sentinel
+  c.strokeStyle='rgba(244,239,230,.06)'; c.lineWidth=1.2;
+  for(const r of [0.30,0.42,0.56]){ c.beginPath(); c.arc(gx,gy,Math.min(W,H)*r,0,Math.PI*2); c.stroke(); }
+  // vignette
+  g=c.createRadialGradient(W/2,H/2,Math.min(W,H)*0.3,W/2,H/2,Math.max(W,H)*0.75); g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(0,0,0,.55)');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+}
+
+// ---------- 3D sentinel ----------
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), antialias:true, alpha:true, preserveDrawingBuffer:true });
+const SQ2 = (mode==='social'||mode==='banner') ? H : W; const GLL = mode==='social'? 30 : mode==='banner'? 150 : 0;
+renderer.setPixelRatio(1); renderer.setSize(SQ2, mode==='avatar'||mode==='mark'? H : H); document.getElementById('gl').style.left=GLL+'px';
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 0.92;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.45;
+
+const RED = new THREE.MeshPhysicalMaterial({ color:0xD62E35, roughness:.34, clearcoat:1, clearcoatRoughness:.14 });
+const REDDEEP = new THREE.MeshPhysicalMaterial({ color:0xA8222A, roughness:.45, clearcoat:.8, clearcoatRoughness:.2 });
+const CREAM = new THREE.MeshPhysicalMaterial({ color:0xF4EFE6, roughness:.28, clearcoat:1, clearcoatRoughness:.1 });
+const GLASS = new THREE.MeshPhysicalMaterial({ color:0x0C1018, roughness:.06, metalness:.2, clearcoat:1, clearcoatRoughness:.02, reflectivity:1 });
+const GLOW = new THREE.MeshBasicMaterial({ color:0xFF2A35, toneMapped:false });
+function haloTex(){const cv=document.createElement('canvas');cv.width=cv.height=128;const x=cv.getContext('2d');const g=x.createRadialGradient(64,64,0,64,64,64);g.addColorStop(0,'rgba(255,70,75,1)');g.addColorStop(.25,'rgba(255,40,50,.55)');g.addColorStop(1,'rgba(255,30,40,0)');x.fillStyle=g;x.fillRect(0,0,128,128);const t=new THREE.CanvasTexture(cv);t.colorSpace=THREE.SRGBColorSpace;return t;}
+const HALO=new THREE.SpriteMaterial({map:haloTex(),blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false,transparent:true});
+function halo(x,y,z,s){const sp=new THREE.Sprite(HALO);sp.position.set(x,y,z);sp.scale.set(s,s,1);return sp;}
+
+const bot = new THREE.Group(); scene.add(bot);
+const bevel = { bevelEnabled:true, bevelThickness:7, bevelSize:6, bevelSegments:10, curveSegments:48 };
+
+// shield with battlement top (same silhouette as the flat mark, y up)
+const sh = new THREE.Shape();
+sh.moveTo(-152,50); sh.lineTo(-104,50); sh.lineTo(-104,28); sh.lineTo(104,28); sh.lineTo(104,50); sh.lineTo(152,50);
+sh.lineTo(152,-46); sh.bezierCurveTo(152,-136,82,-192,0,-226); sh.bezierCurveTo(-82,-192,-152,-136,-152,-46); sh.closePath();
+const shield = new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:46,...bevel}), RED); shield.position.z=-23; shield.castShadow=true; bot.add(shield);
+// parapet band (darker, slightly proud of the face)
+const band = new THREE.Shape(); band.moveTo(-152,50); band.lineTo(-104,50); band.lineTo(-104,28); band.lineTo(104,28); band.lineTo(104,50); band.lineTo(152,50); band.lineTo(152,-12); band.lineTo(-152,-12); band.closePath();
+const bandM = new THREE.Mesh(new THREE.ExtrudeGeometry(band,{depth:4,bevelEnabled:true,bevelThickness:3,bevelSize:3,bevelSegments:6}), REDDEEP); bandM.position.z=24; bot.add(bandM);
+// brick grooves
+for (const x of [-66,0,66]) { const b=new THREE.Mesh(new RoundedBoxGeometry(4,36,3,2,1.5), RED); b.position.set(x,10,31); bot.add(b); }
+const hz=new THREE.Mesh(new RoundedBoxGeometry(270,4,3,2,1.5), RED); hz.position.set(0,10,31); bot.add(hz);
+
+// head dome behind the wall
+const dome = new THREE.Mesh(new THREE.SphereGeometry(100,96,64,0,Math.PI*2,0,Math.PI/2), CREAM);
+dome.scale.set(1.06,1.2,.9); dome.position.set(0,42,-6); dome.castShadow=true; bot.add(dome);
+// antenna
+const stalk=new THREE.Mesh(new THREE.CylinderGeometry(4,5,34,24), CREAM); stalk.position.set(0,172,-6); bot.add(stalk);
+const bulb=new THREE.Mesh(new THREE.SphereGeometry(13,48,32), GLOW); bulb.position.set(0,194,-6); bot.add(bulb);
+const bulbLight=new THREE.PointLight(0xff3a3a, 1.2e4, 300, 2); bulbLight.position.copy(bulb.position); bot.add(bulbLight);
+
+// visor: rounded capsule of glass on the dome
+const vs=new THREE.Shape(); const vw=132,vh=50,vr=25; vs.moveTo(-vw/2+vr,-vh/2); vs.lineTo(vw/2-vr,-vh/2); vs.absarc(vw/2-vr,0,vr,-Math.PI/2,Math.PI/2); vs.lineTo(-vw/2+vr,vh/2); vs.absarc(-vw/2+vr,0,vr,Math.PI/2,Math.PI*1.5);
+const visor=new THREE.Mesh(new THREE.ExtrudeGeometry(vs,{depth:14,bevelEnabled:true,bevelThickness:6,bevelSize:5,bevelSegments:10,curveSegments:40}), GLASS);
+visor.position.set(0,108,58); visor.rotation.x=-0.12; bot.add(visor);
+// eyes: a glowing dot and a targeting reticle
+const eyeL=new THREE.Mesh(new THREE.SphereGeometry(12,40,24), GLOW); eyeL.scale.z=.45; eyeL.position.set(-30,108,79); bot.add(eyeL);
+const ring=new THREE.Mesh(new THREE.TorusGeometry(15,2.6,16,64), GLOW); ring.position.set(30,108,79); bot.add(ring);
+const pupil=new THREE.Mesh(new THREE.SphereGeometry(4.5,24,16), GLOW); pupil.position.set(30,108,80); bot.add(pupil);
+for (const [dx,dy,w,h] of [[0,22,3,9],[0,-22,3,9],[22,0,9,3],[-22,0,9,3]]) { const t=new THREE.Mesh(new RoundedBoxGeometry(w,h,3,2,1), GLOW); t.position.set(30+dx,108+dy,79); bot.add(t); }
+bot.add(halo(-30,108,88,70)); bot.add(halo(30,108,88,84)); bot.add(halo(0,194,0,80));
+const eyeLight=new THREE.PointLight(0xff3a3a, 6e3, 220, 2); eyeLight.position.set(0,106,120); bot.add(eyeLight);
+
+// mitts gripping the wall
+for (const x of [-71,71]) {
+  const m=new THREE.Mesh(new RoundedBoxGeometry(52,34,40,6,14), CREAM); m.position.set(x,44,26); m.castShadow=true; bot.add(m);
+  for (const fx of [-9,9]) { const f=new THREE.Mesh(new RoundedBoxGeometry(2.5,20,4,2,1), new THREE.MeshStandardMaterial({color:0xC9C1B4,roughness:.6})); f.position.set(x+fx,44,47); bot.add(f); }
+}
+// terminal prompt, raised on the shield face
+const pm = CREAM;
+const chev = new THREE.Shape(); chev.moveTo(-52,-60); chev.lineTo(-20,-84); chev.lineTo(-52,-108); chev.lineTo(-40,-120); chev.lineTo(-2,-90); chev.lineTo(-2,-78); chev.lineTo(-40,-48); chev.closePath();
+const chevM=new THREE.Mesh(new THREE.ExtrudeGeometry(chev,{depth:6,bevelEnabled:true,bevelThickness:4,bevelSize:3,bevelSegments:8}), pm); chevM.position.z=24; bot.add(chevM);
+const und=new THREE.Mesh(new RoundedBoxGeometry(50,16,12,4,6), pm); und.position.set(34,-112,30); bot.add(und);
+
+// lights
+scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a0a0c, 0.35));
+const key=new THREE.DirectionalLight(0xfff4ea, 2.0); key.position.set(-260,420,520); key.castShadow=true; key.shadow.mapSize.set(2048,2048);
+Object.assign(key.shadow.camera,{left:-400,right:400,top:400,bottom:-400,near:1,far:2000}); scene.add(key);
+const rim=new THREE.DirectionalLight(0xff4044, 3.2); rim.position.set(380,160,-420); scene.add(rim);
+const rim2=new THREE.DirectionalLight(0x6a8cff, 1.0); rim2.position.set(-420,60,-300); scene.add(rim2);
+// contact shadow
+const shadowPlane=new THREE.Mesh(new THREE.PlaneGeometry(900,900), new THREE.ShadowMaterial({opacity:.35}));
+shadowPlane.rotation.x=-Math.PI/2; shadowPlane.position.y=-232; shadowPlane.receiveShadow=true; scene.add(shadowPlane);
+
+bot.rotation.set(0.06,-0.27,0);
+
+// camera framing per mode
+const cam=new THREE.PerspectiveCamera(30, 1, 10, 5000);
+const frame = { social:{x:0,y:-4,d:1180}, avatar:{x:0,y:-4,d:1080}, banner:{x:0,y:-4,d:1180}, mark:{x:0,y:-4,d:1060} }[mode];
+cam.position.set(frame.x, frame.y+70, frame.d); cam.lookAt(frame.x, frame.y, 0);
+renderer.render(scene, cam);
+
+// ---------- wordmark ----------
+const txt=document.getElementById('txt');
+function word(left, top, size, tagSize, tagTop, align){
+  txt.innerHTML = `<div class="word" style="left:${left}px;top:${top}px;font-size:${size}px"><span class="red">Red</span><span class="cream">filade</span></div>`+
+   (tagSize?`<div class="tag" style="left:${left+size*0.03}px;top:${tagTop}px;font-size:${tagSize}px">Open MCP <b>red-team</b> range</div>`:'');
+}
+if (mode==='social') word(605, 205, 138, 27, 395);
+if (mode==='banner') word(700, 140, 168, 33, 350);
+document.fonts.ready.then(()=>{ document.title='ready'; });
+</script></body></html>
