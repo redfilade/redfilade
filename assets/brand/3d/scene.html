@@ -2,19 +2,19 @@
 <html><head><meta charset="utf-8">
 <script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
 <style>
-@font-face{font-family:IDB;src:url(fonts/InterDisplay-Black.otf)}
-@font-face{font-family:IDS;src:url(fonts/InterDisplay-SemiBold.otf)}
+@font-face{font-family:FRB;src:url(fonts/fredoka-latin-700-normal.woff2)}
+@font-face{font-family:NUN;src:url(fonts/nunito-latin-800-normal.woff2)}
 html,body{margin:0;padding:0;overflow:hidden;background:#070A10}
 #stage{position:relative;overflow:hidden}
 #bg{position:absolute;inset:0}
 canvas#gl{position:absolute;left:0;top:0}
-.word{position:absolute;font-family:IDB;letter-spacing:-.035em;line-height:1;white-space:nowrap}
+.word{position:absolute;font-family:FRB;letter-spacing:-.005em;line-height:1;white-space:nowrap;font-feature-settings:'liga' 0}
 .word span{display:inline-block}
 .red{background:linear-gradient(180deg,#FF8A86 0%,#F2484B 42%,#C8232C 100%);-webkit-background-clip:text;color:transparent;
- filter:drop-shadow(0 1px 0 #B01E27) drop-shadow(0 2px 0 #A11B23) drop-shadow(0 3px 0 #921820) drop-shadow(0 4px 0 #84151C) drop-shadow(0 5px 0 #741218) drop-shadow(0 10px 18px rgba(229,56,59,.45))}
+ filter:drop-shadow(0 2px 0 #B01E27) drop-shadow(0 2px 0 #A11B23) drop-shadow(0 2px 0 #921820) drop-shadow(0 2px 0 #84151C) drop-shadow(0 2px 0 #6E1217) drop-shadow(0 14px 22px rgba(229,56,59,.5))}
 .cream{background:linear-gradient(180deg,#FFFFFF 0%,#F7F1E8 45%,#D9D1C4 100%);-webkit-background-clip:text;color:transparent;
- filter:drop-shadow(0 1px 0 #BDB4A6) drop-shadow(0 2px 0 #A9A092) drop-shadow(0 3px 0 #958C7F) drop-shadow(0 4px 0 #81796C) drop-shadow(0 5px 0 #6D655A) drop-shadow(0 10px 18px rgba(0,0,0,.55))}
-.tag{position:absolute;font-family:IDS;color:#E9E3D9;letter-spacing:.22em;text-transform:uppercase;white-space:nowrap}
+ filter:drop-shadow(0 2px 0 #BDB4A6) drop-shadow(0 2px 0 #A9A092) drop-shadow(0 2px 0 #958C7F) drop-shadow(0 2px 0 #81796C) drop-shadow(0 2px 0 #635C52) drop-shadow(0 14px 22px rgba(0,0,0,.55))}
+.tag{position:absolute;font-family:NUN;color:#E9E3D9;letter-spacing:.2em;text-transform:uppercase;white-space:nowrap}
 .tag b{color:#F2484B;font-weight:inherit}
 </style></head>
 <body><div id="stage"><canvas id="bg"></canvas><canvas id="gl"></canvas><div id="txt"></div></div>
@@ -37,6 +37,12 @@ if (mode !== 'mark') {
   const gx = GL_LEFT + SQ/2, gy = H*0.46;
   g=c.createRadialGradient(gx,gy,0,gx,gy,Math.max(W,H)*0.55); g.addColorStop(0,'rgba(229,56,59,.30)'); g.addColorStop(.35,'rgba(229,56,59,.08)'); g.addColorStop(1,'rgba(229,56,59,0)');
   c.fillStyle=g; c.fillRect(0,0,W,H);
+  // cool teal 'defence' glow on the far side
+  const tx = mode==='avatar'? W*0.92 : W*0.9, ty = mode==='avatar'? H*0.12 : H*0.22;
+  g=c.createRadialGradient(tx,ty,0,tx,ty,Math.max(W,H)*0.6); g.addColorStop(0,'rgba(38,190,190,.26)'); g.addColorStop(.4,'rgba(38,170,180,.09)'); g.addColorStop(1,'rgba(38,170,180,0)');
+  c.fillStyle=g; c.fillRect(0,0,W,H);
+  // warm red wash from the opposite corner
+  g=c.createRadialGradient(0,0,0,0,0,Math.max(W,H)*0.55); g.addColorStop(0,'rgba(150,40,48,.28)'); g.addColorStop(1,'rgba(150,40,48,0)'); c.fillStyle=g; c.fillRect(0,0,W,H);
   // perspective floor grid
   const hy=H*0.66, vx=gx; c.lineWidth=1;
   for(let i=-30;i<=30;i++){ const x=vx+i*W*0.06; c.strokeStyle=`rgba(242,72,75,${0.10-Math.abs(i)*0.002})`;
@@ -74,57 +80,85 @@ const HALO=new THREE.SpriteMaterial({map:haloTex(),blending:THREE.AdditiveBlendi
 function halo(x,y,z,s){const sp=new THREE.Sprite(HALO);sp.position.set(x,y,z);sp.scale.set(s,s,1);return sp;}
 
 const bot = new THREE.Group(); scene.add(bot);
-const bevel = { bevelEnabled:true, bevelThickness:7, bevelSize:6, bevelSegments:10, curveSegments:48 };
 
-// shield with battlement top (same silhouette as the flat mark, y up)
-const sh = new THREE.Shape();
-sh.moveTo(-152,50); sh.lineTo(-104,50); sh.lineTo(-104,28); sh.lineTo(104,28); sh.lineTo(104,50); sh.lineTo(152,50);
-sh.lineTo(152,-46); sh.bezierCurveTo(152,-136,82,-192,0,-226); sh.bezierCurveTo(-82,-192,-152,-136,-152,-46); sh.closePath();
-const shield = new THREE.Mesh(new THREE.ExtrudeGeometry(sh,{depth:46,...bevel}), RED); shield.position.z=-23; shield.castShadow=true; bot.add(shield);
-// parapet band (darker, slightly proud of the face)
-const band = new THREE.Shape(); band.moveTo(-152,50); band.lineTo(-104,50); band.lineTo(-104,28); band.lineTo(104,28); band.lineTo(104,50); band.lineTo(152,50); band.lineTo(152,-12); band.lineTo(-152,-12); band.closePath();
-const bandM = new THREE.Mesh(new THREE.ExtrudeGeometry(band,{depth:4,bevelEnabled:true,bevelThickness:3,bevelSize:3,bevelSegments:6}), REDDEEP); bandM.position.z=24; bot.add(bandM);
-// brick grooves
-for (const x of [-66,0,66]) { const b=new THREE.Mesh(new RoundedBoxGeometry(4,36,3,2,1.5), RED); b.position.set(x,10,31); bot.add(b); }
-const hz=new THREE.Mesh(new RoundedBoxGeometry(270,4,3,2,1.5), RED); hz.position.set(0,10,31); bot.add(hz);
-
-// head dome behind the wall
-const dome = new THREE.Mesh(new THREE.SphereGeometry(100,96,64,0,Math.PI*2,0,Math.PI/2), CREAM);
-dome.scale.set(1.06,1.2,.9); dome.position.set(0,42,-6); dome.castShadow=true; bot.add(dome);
-// antenna
-const stalk=new THREE.Mesh(new THREE.CylinderGeometry(4,5,34,24), CREAM); stalk.position.set(0,172,-6); bot.add(stalk);
-const bulb=new THREE.Mesh(new THREE.SphereGeometry(13,48,32), GLOW); bulb.position.set(0,194,-6); bot.add(bulb);
-const bulbLight=new THREE.PointLight(0xff3a3a, 1.2e4, 300, 2); bulbLight.position.copy(bulb.position); bot.add(bulbLight);
-
-// visor: rounded capsule of glass on the dome
-const vs=new THREE.Shape(); const vw=132,vh=50,vr=25; vs.moveTo(-vw/2+vr,-vh/2); vs.lineTo(vw/2-vr,-vh/2); vs.absarc(vw/2-vr,0,vr,-Math.PI/2,Math.PI/2); vs.lineTo(-vw/2+vr,vh/2); vs.absarc(-vw/2+vr,0,vr,Math.PI/2,Math.PI*1.5);
-const visor=new THREE.Mesh(new THREE.ExtrudeGeometry(vs,{depth:14,bevelEnabled:true,bevelThickness:6,bevelSize:5,bevelSegments:10,curveSegments:40}), GLASS);
-visor.position.set(0,108,58); visor.rotation.x=-0.12; bot.add(visor);
-// eyes: a glowing dot and a targeting reticle
-const eyeL=new THREE.Mesh(new THREE.SphereGeometry(12,40,24), GLOW); eyeL.scale.z=.45; eyeL.position.set(-30,108,79); bot.add(eyeL);
-const ring=new THREE.Mesh(new THREE.TorusGeometry(15,2.6,16,64), GLOW); ring.position.set(30,108,79); bot.add(ring);
-const pupil=new THREE.Mesh(new THREE.SphereGeometry(4.5,24,16), GLOW); pupil.position.set(30,108,80); bot.add(pupil);
-for (const [dx,dy,w,h] of [[0,22,3,9],[0,-22,3,9],[22,0,9,3],[-22,0,9,3]]) { const t=new THREE.Mesh(new RoundedBoxGeometry(w,h,3,2,1), GLOW); t.position.set(30+dx,108+dy,79); bot.add(t); }
-bot.add(halo(-30,108,88,70)); bot.add(halo(30,108,88,84)); bot.add(halo(0,194,0,80));
-const eyeLight=new THREE.PointLight(0xff3a3a, 6e3, 220, 2); eyeLight.position.set(0,106,120); bot.add(eyeLight);
-
-// mitts gripping the wall
-for (const x of [-71,71]) {
-  const m=new THREE.Mesh(new RoundedBoxGeometry(52,34,40,6,14), CREAM); m.position.set(x,44,26); m.castShadow=true; bot.add(m);
-  for (const fx of [-9,9]) { const f=new THREE.Mesh(new RoundedBoxGeometry(2.5,20,4,2,1), new THREE.MeshStandardMaterial({color:0xC9C1B4,roughness:.6})); f.position.set(x+fx,44,47); bot.add(f); }
+// Polygon with a rounding radius per vertex (quadratic corners) -> soft, toy-like outlines.
+function roundedShape(pts) {
+  const sh = new THREE.Shape(); const n = pts.length;
+  const at = (i) => pts[(i + n) % n];
+  const towards = (p, q, r) => { const dx=q[0]-p[0], dy=q[1]-p[1], L=Math.hypot(dx,dy); const k=Math.min(r, L/2)/L; return [p[0]+dx*k, p[1]+dy*k]; };
+  for (let i = 0; i < n; i++) {
+    const p = at(i), r = p[2] || 0;
+    const a = towards(p, at(i-1), r), b = towards(p, at(i+1), r);
+    if (i === 0) sh.moveTo(a[0], a[1]); else sh.lineTo(a[0], a[1]);
+    sh.quadraticCurveTo(p[0], p[1], b[0], b[1]);
+  }
+  sh.closePath(); return sh;
 }
-// terminal prompt, raised on the shield face
-const pm = CREAM;
-const chev = new THREE.Shape(); chev.moveTo(-52,-60); chev.lineTo(-20,-84); chev.lineTo(-52,-108); chev.lineTo(-40,-120); chev.lineTo(-2,-90); chev.lineTo(-2,-78); chev.lineTo(-40,-48); chev.closePath();
-const chevM=new THREE.Mesh(new THREE.ExtrudeGeometry(chev,{depth:6,bevelEnabled:true,bevelThickness:4,bevelSize:3,bevelSegments:8}), pm); chevM.position.z=24; bot.add(chevM);
-const und=new THREE.Mesh(new RoundedBoxGeometry(50,16,12,4,6), pm); und.position.set(34,-112,30); bot.add(und);
+const puffy = (t, s, segs=18) => ({ bevelEnabled:true, bevelThickness:t, bevelSize:s, bevelSegments:segs, curveSegments:64 });
+
+// Shield: rounded battlements, curved shoulders, soft tip
+const SHIELD = [
+  [-152, 74, 16], [-98, 74, 14], [-98, 36, 10], [98, 36, 10], [98, 74, 14], [152, 74, 16],
+  [152, -30, 30], [136, -112, 46], [86, -180, 44], [0, -228, 36], [-86, -180, 44], [-136, -112, 46], [-152, -30, 30],
+];
+const shield = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedShape(SHIELD), { depth: 34, ...puffy(20, 14) }), RED);
+shield.position.z = -17; shield.castShadow = true; bot.add(shield);
+
+// Parapet band: darker, rounded, slightly proud of the face
+const BAND = [
+  [-152, 74, 16], [-98, 74, 14], [-98, 36, 10], [98, 36, 10], [98, 74, 14], [152, 74, 16],
+  [152, -6, 20], [-152, -6, 20],
+];
+const band = new THREE.Mesh(new THREE.ExtrudeGeometry(roundedShape(BAND), { depth: 2, ...puffy(10, 8, 12) }), REDDEEP);
+band.scale.set(0.9, 0.9, 1); band.position.set(0, 4, 40); bot.add(band);
+
+// Head: a full, round dome sitting behind the wall
+const head = new THREE.Mesh(new THREE.SphereGeometry(108, 96, 64), CREAM);
+head.scale.set(1, 0.94, 0.86); head.position.set(0, 66, -62); head.castShadow = true; bot.add(head);
+
+// Antenna
+const stalk = new THREE.Mesh(new THREE.CapsuleGeometry(5, 26, 8, 24), CREAM); stalk.position.set(0, 186, -62); bot.add(stalk);
+const bulb = new THREE.Mesh(new THREE.SphereGeometry(15, 48, 32), GLOW); bulb.position.set(0, 210, -62); bot.add(bulb);
+
+// Visor: a puffy glass pill
+const vw = 134, vh = 50, vr = 25;
+const vs = new THREE.Shape(); vs.moveTo(-vw/2+vr, -vh/2); vs.lineTo(vw/2-vr, -vh/2); vs.absarc(vw/2-vr, 0, vr, -Math.PI/2, Math.PI/2);
+vs.lineTo(-vw/2+vr, vh/2); vs.absarc(-vw/2+vr, 0, vr, Math.PI/2, Math.PI*1.5);
+const visor = new THREE.Mesh(new THREE.ExtrudeGeometry(vs, { depth: 8, ...puffy(12, 10, 16) }), GLASS);
+visor.position.set(0, 122, 10); visor.rotation.x = -0.12; bot.add(visor);
+
+// Eyes: a glowing dot and a targeting reticle
+const EY = 122, EZ = 33;
+const eyeL = new THREE.Mesh(new THREE.SphereGeometry(13, 40, 24), GLOW); eyeL.scale.z = .5; eyeL.position.set(-30, EY, EZ); bot.add(eyeL);
+const ring = new THREE.Mesh(new THREE.TorusGeometry(15, 3, 20, 64), GLOW); ring.position.set(30, EY, EZ); bot.add(ring);
+const pupil = new THREE.Mesh(new THREE.SphereGeometry(5, 24, 16), GLOW); pupil.position.set(30, EY, EZ + 1); bot.add(pupil);
+for (const [dx, dy, w, h] of [[0,23,3.5,9],[0,-23,3.5,9],[23,0,9,3.5],[-23,0,9,3.5]]) {
+  const t = new THREE.Mesh(new THREE.CapsuleGeometry(Math.min(w,h)/2, Math.max(w,h)-Math.min(w,h), 6, 12), GLOW);
+  if (w > h) t.rotation.z = Math.PI/2; t.position.set(30+dx, EY+dy, EZ); bot.add(t);
+}
+bot.add(halo(-30, EY, EZ+6, 74)); bot.add(halo(30, EY, EZ+6, 88)); bot.add(halo(0, 210, -50, 84));
+const eyeLight = new THREE.PointLight(0xff3a3a, 6e3, 220, 2); eyeLight.position.set(0, EY, 130); bot.add(eyeLight);
+const bulbLight = new THREE.PointLight(0xff3a3a, 1.2e4, 300, 2); bulbLight.position.copy(bulb.position); bot.add(bulbLight);
+
+// Round hands gripping the wall
+for (const x of [-60, 60]) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(27, 48, 32), CREAM); m.scale.set(1.15, 0.8, 0.95);
+  m.position.set(x, 44, 30); m.castShadow = true; bot.add(m);
+}
+
+// Terminal prompt as soft rounded tubes, raised on the shield face
+const PZ = 34, TR = 10;
+const chev = new THREE.CatmullRomCurve3([new THREE.Vector3(-50,-60,PZ), new THREE.Vector3(-14,-88,PZ), new THREE.Vector3(-50,-116,PZ)], false, 'catmullrom', 0.02);
+bot.add(new THREE.Mesh(new THREE.TubeGeometry(chev, 64, TR, 24, false), CREAM));
+for (const v of [[-50,-60],[-50,-116]]) { const cap = new THREE.Mesh(new THREE.SphereGeometry(TR, 24, 16), CREAM); cap.position.set(v[0], v[1], PZ); bot.add(cap); }
+const und = new THREE.Mesh(new THREE.CapsuleGeometry(TR, 34, 8, 24), CREAM); und.rotation.z = Math.PI/2; und.position.set(26, -116, PZ); bot.add(und);
 
 // lights
 scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x2a0a0c, 0.35));
 const key=new THREE.DirectionalLight(0xfff4ea, 2.0); key.position.set(-260,420,520); key.castShadow=true; key.shadow.mapSize.set(2048,2048);
 Object.assign(key.shadow.camera,{left:-400,right:400,top:400,bottom:-400,near:1,far:2000}); scene.add(key);
 const rim=new THREE.DirectionalLight(0xff4044, 3.2); rim.position.set(380,160,-420); scene.add(rim);
-const rim2=new THREE.DirectionalLight(0x6a8cff, 1.0); rim2.position.set(-420,60,-300); scene.add(rim2);
+const rim2=new THREE.DirectionalLight(0x3fd6d0, 1.6); rim2.position.set(-420,60,-300); scene.add(rim2);
 // contact shadow
 const shadowPlane=new THREE.Mesh(new THREE.PlaneGeometry(900,900), new THREE.ShadowMaterial({opacity:.35}));
 shadowPlane.rotation.x=-Math.PI/2; shadowPlane.position.y=-232; shadowPlane.receiveShadow=true; scene.add(shadowPlane);
