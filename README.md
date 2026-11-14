@@ -28,7 +28,18 @@ It has two front doors on one engine:
 Both share one execution engine, one oracle and one evidence format. An attack discovered in the Range becomes a test that every builder can run the next day.
 
 > [!IMPORTANT]
-> **Redfilade is in Phase 0.** This repository currently holds the security foundation: policies, pipeline, architecture decisions and the data model. There is no runnable CLI yet. Commands shown below are the planned interface.
+> **Redfilade is early (Phase 1).** The range runs, attacks and judges its first scenario end to end in hardened container cells. The battery is small, and hosted features are not built yet. See the [roadmap](#roadmap).
+
+## Try it
+
+```sh
+go build -o redfilade ./cmd/redfilade
+scripts/build-targets.sh        # needs Docker
+./redfilade range gate          # every vulnerable twin must be exploited, every secure twin must hold
+./redfilade test --image ghcr.io/you/your-mcp-server:dev --level L1 --sarif results.sarif
+```
+
+Full guide: [`docs/range.md`](docs/range.md).
 
 ## Rules of engagement
 
@@ -66,21 +77,21 @@ flowchart LR
 
 The Range and the Test Bench differ only in what sits in the target slot: one of our deliberately weak targets, or the builder's own server or client.
 
-## Ways to test (planned)
+## Ways to test
 
 | Way in | For | Example | What leaves your machine |
 |---|---|---|---|
-| Local CLI | Solo developers, open-source maintainers | `redfilade test --server "npx my-server" --level L2` | Nothing |
-| CI action | Teams shipping on GitHub or GitLab | `uses: redfilade/test-action@<sha>` | Nothing beyond your CI runner |
-| Hosted, remote URL | Companies with a remote MCP endpoint | Verify your domain once, then schedule tests | Test traffic to your own verified domain |
-| Client test | IDE, agent and desktop-app makers | Point your client at our hostile test servers | Only what your client sends to them |
-| Self-hosted | Regulated enterprises | Helm chart in your own cluster, air-gapped signing | Nothing |
+| Local CLI (available) | Solo developers, open-source maintainers | `redfilade test --image my-server:dev --level L1` | Nothing |
+| CI action (available) | Teams shipping on GitHub | `uses: redfilade/redfilade@<commit-sha>` | Nothing beyond your CI runner |
+| Hosted, remote URL (planned) | Companies with a remote MCP endpoint | Verify your domain once, then schedule tests | Test traffic to your own verified domain |
+| Client test (planned) | IDE, agent and desktop-app makers | Point your client at our hostile test servers | Only what your client sends to them |
+| Self-hosted (planned) | Regulated enterprises | Helm chart in your own cluster, air-gapped signing | Nothing |
 
-## Test levels (planned)
+## Test levels
 
 | Level | Checks | Verdict |
 |---|---|---|
-| **L1** Conformance and hygiene | Protocol correctness, schemas, auth required, leaky errors, oversized inputs | Strong for what it covers |
+| **L1** Conformance and hygiene (first attack available) | Protocol correctness, schemas, auth required, leaky errors, oversized inputs | Strong for what it covers |
 | **L2** Security battery | Injection, path traversal, SSRF, token audience, rate limits, secrets in outputs | Strong when side effects are observable |
 | **L3** Agent-in-the-loop | A real model uses your server while attacks arrive through descriptions, outputs and other servers | A success rate with a 95% interval |
 | **L4** Client and host | Your client facing hostile servers: hidden text, sampling abuse, approval tricks | Strong: we control the hostile side |
@@ -91,7 +102,7 @@ Every report states which level ran, the verdict per scenario, **what could not 
 ## Roadmap
 
 - [ ] **Phase 0: Foundation.** Hardened organisation, rulesets, pinned and least-privilege CI, secret scanning, dependency policy, threat model, ADR-001 to ADR-012, multi-tenant schema, a proven signed dry-run release. Tracked in [`docs/phase-0.md`](docs/phase-0.md).
-- [ ] **Phase 1: Walking skeleton.** `redfilade test --level L1` runs one attack against a vulnerable and a secure twin, the oracle observes it, and a signed SARIF report comes out.
+- [ ] **Phase 1: Walking skeleton.** `redfilade test --level L1` runs one attack against a vulnerable and a secure twin, the oracle observes it, and a signed SARIF report comes out. Built; the signed proof runs in the release workflow. Tracked in [`docs/phase-1.md`](docs/phase-1.md).
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks.
 - [ ] **Phase 3: Hosted Test Bench.** Domain verification, remote targets and L3 agent-in-the-loop testing.
 
@@ -100,7 +111,11 @@ Every report states which level ran, the verdict per scenario, **what could not 
 ```text
 .github/            CI (untrusted lane), release (trusted lane), CODEOWNERS, ruleset
 assets/brand/       Logo, avatar and social preview, plus the script that builds them
-cmd/redfilade/      CLI entry point (Go)
+cmd/redfilade/      CLI (Go)
+internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery
+scenarios/          Range scenarios: data-only manifests (ADR-0013)
+targets/            Vulnerable and secure twins, built into FROM-scratch images
+action.yml          GitHub Action for builders
 db/migrations/      Multi-tenant Postgres schema with row-level security
 docs/adr/           Architecture Decision Records 001 to 012
 docs/threat-model/  STRIDE threat model of the four planes

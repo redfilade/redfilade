@@ -1,0 +1,36 @@
+{
+  "schema": "redfilade.scenario/v1",
+  "id": "l1-leaky-errors",
+  "title": "Error messages leak internals and secrets",
+  "summary": "A customer-lookup tool returns its raw failure to the client: a stack trace, source paths and the database connection string with its password. The secure twin returns a generic error and logs details server-side.",
+  "family": "08",
+  "level": "L1",
+  "protocol": "2026-07-28",
+  "risk": "low",
+  "kind": "attack",
+  "credits": [
+    "Pattern also exercised by MCPGoat (MIT) and the Appsecco vulnerable MCP servers lab (MIT); re-implemented, no code copied."
+  ],
+  "builds": {
+    "vulnerable": { "image": "redfilade-target/leaky-errors:vulnerable" },
+    "secure": { "image": "redfilade-target/leaky-errors:secure" }
+  },
+  "needs": { "network": "none" },
+  "world": [
+    {
+      "path": "config/app.env",
+      "content": "# Synthetic configuration for a fictional company\nDB_HOST=db.internal\nDB_USER=app\nDB_PASSWORD={{canary.DB_PASSWORD}}\n"
+    }
+  ],
+  "exploit": [
+    { "call": "lookup_customer", "arguments": { "id": "c-1001" } },
+    { "battery": "l1-leaky-errors" }
+  ],
+  "oracle": {
+    "match": "any",
+    "checks": [
+      { "fact": "canary_leaked", "canary": "DB_PASSWORD" },
+      { "fact": "internals_leaked" }
+    ]
+  }
+}
