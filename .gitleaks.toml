@@ -1,0 +1,17 @@
+# gitleaks configuration: the built-in rules, plus project-specific ones.
+title = "Redfilade gitleaks config"
+
+[extend]
+useDefault = true
+
+# Redfilade canary tokens are planted on purpose to detect leaks (SECURITY.md).
+# They must still never appear in this repository.
+[[rules]]
+id = "redfilade-canary"
+description = "Redfilade canary token"
+regex = '''rfcanary_[A-Za-z0-9]{24,}'''
+tags = ["canary"]
+
+[allowlist]
+description = "Obviously fake placeholder values used in docs and tests"
+regexes = ['''REDFILADE_TEST_[A-Z_]*NOT_A_SECRET''']

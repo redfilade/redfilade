@@ -1,0 +1,23 @@
+[project]
+name = "redfilade-harness"
+version = "0.0.0"
+description = "Redfilade attack harness and scenario SDK."
+readme = "harness/README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "harness/src"
+module-name = "redfilade_harness"
+
+[tool.uv]
+# Supply-chain policy: ignore anything uploaded to PyPI in the last 7 days.
+exclude-newer = "7 days"
+# Every resolution is locked with hashes in uv.lock; CI uses `uv sync --locked`.
+required-version = ">=0.11"

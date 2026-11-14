@@ -1,0 +1,20 @@
+# Architecture Decision Records
+
+Each significant decision is recorded as one short page: the question, the options, the choice, and what we gave up. Product names are current choices, not lock-in; each record says when to revisit it.
+
+To propose a change, copy [`template.md`](template.md) to the next number and open a pull request.
+
+| ADR | Decision | Status |
+|---|---|---|
+| [0001](0001-isolate-attack-runs-in-microvms.md) | Isolate attack runs in microVMs | Accepted |
+| [0002](0002-schedule-runs-and-isolate-tenants-with-kubernetes.md) | Schedule runs and isolate tenants with Kubernetes | Accepted |
+| [0003](0003-languages-go-core-python-harness-typescript-web.md) | Languages: Go core, Python harness, TypeScript web | Accepted |
+| [0004](0004-postgres-for-results-write-once-object-storage-for-evidence.md) | Postgres for results, write-once object storage for evidence | Accepted |
+| [0005](0005-postgres-job-table-before-any-message-broker.md) | Postgres job table before any message broker | Accepted |
+| [0006](0006-the-oracle-observes-from-the-host-side-with-ebpf.md) | The oracle observes from the host side with eBPF | Accepted |
+| [0007](0007-keyless-signing-of-results-and-releases.md) | Keyless signing of results and releases | Accepted |
+| [0008](0008-a-thin-fully-reviewable-model-proxy.md) | A thin, fully reviewable model proxy | Accepted |
+| [0009](0009-sign-in-through-github-oauth-and-enterprise-sso.md) | Sign-in through GitHub OAuth and enterprise SSO | Accepted |
+| [0010](0010-remote-testing-only-against-verified-domains.md) | Remote testing only against verified domains | Accepted |
+| [0011](0011-standard-report-formats.md) | Standard report formats | Accepted |
+| [0012](0012-supported-mcp-protocol-versions.md) | Supported MCP protocol versions | Accepted |

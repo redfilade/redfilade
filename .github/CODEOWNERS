@@ -1,0 +1,31 @@
+# Code owners must approve changes to these paths (enforced by the main ruleset).
+# Replace @sankettheinventor with @redfilade/maintainers once that team exists.
+
+*                          @sankettheinventor
+
+# Pipeline, policy and repository settings
+/.github/                  @sankettheinventor
+/renovate.json             @sankettheinventor
+/.pre-commit-config.yaml   @sankettheinventor
+/.gitleaks.toml            @sankettheinventor
+
+# Dependency policy and lockfiles
+/package.json              @sankettheinventor
+/pnpm-workspace.yaml       @sankettheinventor
+/pnpm-lock.yaml            @sankettheinventor
+/.npmrc                    @sankettheinventor
+/pyproject.toml            @sankettheinventor
+/uv.lock                   @sankettheinventor
+/go.mod                    @sankettheinventor
+/go.sum                    @sankettheinventor
+
+# Security-critical code
+/harness/                  @sankettheinventor
+/internal/oracle/          @sankettheinventor
+/internal/signing/         @sankettheinventor
+/db/migrations/            @sankettheinventor
+
+# Policy documents
+/SECURITY.md               @sankettheinventor
+/docs/adr/                 @sankettheinventor
+/docs/threat-model/        @sankettheinventor

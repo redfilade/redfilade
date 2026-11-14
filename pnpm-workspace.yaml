@@ -1,0 +1,12 @@
+# Workspace packages are added here as they are created (web UI, TypeScript targets).
+packages: []
+
+# Supply-chain policy (ADR-003 and docs/phase-0.md). Owned by CODEOWNERS.
+# Refuse any package version published less than 7 days ago (value in minutes).
+minimumReleaseAge: 10080
+# Fail the install if any dependency tries to run a build/install script
+# that is not explicitly allowed below.
+strictDepBuilds: true
+# Dependencies allowed to run install scripts. Keep this list empty unless
+# an ADR says otherwise.
+onlyBuiltDependencies: []

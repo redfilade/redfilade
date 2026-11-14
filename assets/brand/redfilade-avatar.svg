@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="t"><title id="t">Redfilade</title><rect width="512" height="512" fill="#10141C"/><g transform="translate(36 30) scale(.86)">
+  <!-- antenna -->
+  <path d="M256 122 V96" stroke="#F4EFE6" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="256" cy="84" r="13" fill="#E5383B"/>
+  <!-- head, in defilade behind the parapet -->
+  <path d="M156 236 C156 164 200 118 256 118 C312 118 356 164 356 236 Z" fill="#F4EFE6"/>
+  <!-- visor -->
+  <rect x="184" y="160" width="144" height="50" rx="25" fill="#10141C"/>
+  <circle cx="226" cy="185" r="12" fill="#E5383B"/>
+  <circle cx="288" cy="185" r="14.5" fill="none" stroke="#E5383B" stroke-width="4.5"/>
+  <circle cx="288" cy="185" r="4" fill="#E5383B"/>
+  <path d="M288 164 V172 M288 198 V206 M267 185 H275 M301 185 H309" stroke="#E5383B" stroke-width="4" stroke-linecap="round"/>
+  <!-- shield with battlement top -->
+  <path d="M104 206 H152 V228 H360 V206 H408 V302 C408 392 338 448 256 482 C174 448 104 392 104 302 Z" fill="#E5383B"/>
+  <path d="M104 206 H152 V228 H360 V206 H408 V266 H104 Z" fill="#A8222A"/>
+  <path d="M190 228 V266 M256 228 V266 M322 228 V266 M128 246 H384" stroke="#E5383B" stroke-width="5" opacity=".55"/>
+  <!-- mitts gripping the wall -->
+  <rect x="164" y="212" width="50" height="34" rx="15" fill="#F4EFE6"/>
+  <rect x="298" y="212" width="50" height="34" rx="15" fill="#F4EFE6"/>
+  <path d="M181 220 V236 M197 220 V236 M315 220 V236 M331 220 V236" stroke="#10141C" stroke-width="3.5" stroke-linecap="round" opacity=".35"/>
+  <!-- terminal prompt -->
+  <path d="M206 322 L240 350 L206 378" fill="none" stroke="#F4EFE6" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M260 382 H306" stroke="#F4EFE6" stroke-width="17" stroke-linecap="round"/>
+</g></svg>

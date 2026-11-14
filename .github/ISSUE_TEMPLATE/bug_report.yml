@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in Redfilade does not work as documented (not a security issue).
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Is this a security problem?** Stop here and [report it privately](https://github.com/redfilade/redfilade/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Remove any tokens, keys, hostnames or other private details first.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Redfilade version or commit
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmations
+      options:
+        - label: This report contains no secrets, credentials or private data.
+          required: true

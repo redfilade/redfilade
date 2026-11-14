@@ -1,0 +1,55 @@
+name: Attack idea
+description: Propose a new attack class or scenario for the Range.
+labels: ["attack-idea", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for strengthening the Range. Describe the **technique**, not a working exploit for unpatched third-party software. If your idea comes from a live vulnerability in someone else's product, disclose it to them privately first.
+  - type: textarea
+    id: technique
+    attributes:
+      label: The attack
+      description: What does the attacker control, and what do they gain?
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: MCP surface
+      multiple: true
+      options:
+        - Tool descriptions or metadata
+        - Tool inputs
+        - Tool outputs
+        - Resources or prompts
+        - Sampling
+        - Authorization (OAuth, tokens)
+        - Transport (stdio, HTTP)
+        - Client or host behaviour
+        - Multi-server interaction
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: level
+    attributes:
+      label: Closest test level
+      options: ["L1 Conformance", "L2 Security battery", "L3 Agent-in-the-loop", "L4 Client and host", "L5 Defence", "Not sure"]
+  - type: textarea
+    id: oracle
+    attributes:
+      label: How would we know it succeeded?
+      description: What observable fact (file read, network call, data change) proves the attack worked?
+  - type: textarea
+    id: references
+    attributes:
+      label: Public references
+      description: Papers, advisories or write-ups, if any.
+  - type: checkboxes
+    id: ethics
+    attributes:
+      label: Rules of engagement
+      options:
+        - label: This issue contains no working exploit for an unpatched vulnerability in third-party software.
+          required: true
