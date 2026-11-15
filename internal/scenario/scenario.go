@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -66,6 +67,8 @@ type Manifest struct {
 
 	// Dir is where the manifest was loaded from (not part of the JSON).
 	Dir string `json:"-"`
+	// Raw holds the exact manifest bytes, used for the pack digest.
+	Raw []byte `json:"-"`
 }
 
 // Builds holds the vulnerable and secure twins.
@@ -173,7 +176,28 @@ func Parse(r io.Reader) (*Manifest, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
+	m.Raw = b
 	return &m, nil
+}
+
+// LoadFS reads and validates dir/scenario.json from an fs.FS (used for the
+// scenarios built into the binary).
+func LoadFS(fsys fs.FS, dir string) (*Manifest, error) {
+	f, err := fsys.Open(path.Join(dir, FileName))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	m, err := Parse(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path.Join(dir, FileName), err)
+	}
+	return m, nil
+}
+
+// PinnedImages reports whether both builds reference images by digest.
+func (m *Manifest) PinnedImages() bool {
+	return strings.Contains(m.Builds.Vulnerable.Image, "@sha256:") && strings.Contains(m.Builds.Secure.Image, "@sha256:")
 }
 
 // Validate checks every field against the format's bounds.

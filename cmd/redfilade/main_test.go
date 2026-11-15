@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -131,8 +132,8 @@ func TestRangeGateEndToEnd(t *testing.T) {
 	out := t.TempDir()
 	var stdout, stderr bytes.Buffer
 	junit := filepath.Join(out, "gate.xml")
-	args := append([]string{"range", "gate"}, allScenarioDirs(t)...)
-	args = append(args, "--yes", "--out", out, "--junit", junit)
+	// No directories: the gate runs every scenario built into the binary.
+	args := []string{"range", "gate", "--yes", "--out", out, "--junit", junit}
 	code := Main(context.Background(), args,
 		strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
 	if code != exitPass {
@@ -262,5 +263,77 @@ func TestSplitPositional(t *testing.T) {
 	dir, rest := splitPositional([]string{"--build", "vulnerable", "scenarios/x", "--yes"})
 	if dir != "scenarios/x" || strings.Join(rest, " ") != "--build vulnerable --yes" {
 		t.Fatalf("dir=%q rest=%v", dir, rest)
+	}
+}
+
+// copyPack copies a built-in scenario directory so it counts as an external pack.
+func copyPack(t *testing.T, id string) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join("../../scenarios", id, "scenario.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "scenario.json"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestExternalPackPolicy(t *testing.T) {
+	shim := buildTwins(t)
+	dir := copyPack(t, "l1-leaky-errors")
+	run := func(extra ...string) (int, string) {
+		var stdout, stderr bytes.Buffer
+		args := append([]string{"range", "run", dir, "--build", "vulnerable", "--yes", "--out", t.TempDir()}, extra...)
+		code := Main(context.Background(), args, strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
+		return code, stdout.String() + stderr.String()
+	}
+	if code, out := run(); code != exitError || !strings.Contains(out, "unsigned") {
+		t.Fatalf("an unsigned pack must be refused by default (exit %d):\n%s", code, out)
+	}
+	if code, out := run("--allow-unsigned", "--confirm", "wrong-id"); code != exitError {
+		t.Fatalf("a wrong confirmation must be refused (exit %d):\n%s", code, out)
+	}
+	if code, out := run("--allow-unsigned", "--confirm", "l1-leaky-errors"); code != exitError || !strings.Contains(out, "digest") {
+		t.Fatalf("a non-interactive unsigned run needs an allowed digest (exit %d):\n%s", code, out)
+	}
+	var dig bytes.Buffer
+	if code := Main(context.Background(), []string{"pack", "digest", dir}, strings.NewReader(""), &dig, io.Discard, sandbox.Runner{Binary: shim}); code != exitPass {
+		t.Fatalf("pack digest exit %d", code)
+	}
+	d := strings.TrimSpace(dig.String())
+	if !strings.HasPrefix(d, "sha256:") {
+		t.Fatalf("digest %q", d)
+	}
+	code, out := run("--allow-unsigned", "--confirm", "l1-leaky-errors", "--allow-digest", d)
+	if code != exitFindings || !strings.Contains(out, "EXTERNAL PACK") {
+		t.Fatalf("an allowed, confirmed pack should run and be exploited (exit %d):\n%s", code, out)
+	}
+	// Changing one byte changes the digest, so the same allowance no longer applies.
+	b, _ := os.ReadFile(filepath.Join(dir, "scenario.json"))
+	if err := os.WriteFile(filepath.Join(dir, "scenario.json"), append(b, '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := run("--allow-unsigned", "--confirm", "l1-leaky-errors", "--allow-digest", d); code != exitError {
+		t.Fatalf("a modified pack must not match the old digest (exit %d):\n%s", code, out)
+	}
+}
+
+func TestBuiltinByID(t *testing.T) {
+	shim := buildTwins(t)
+	var stdout, stderr bytes.Buffer
+	code := Main(context.Background(), []string{"range", "run", "l2-secrets-in-output", "--build", "secure", "--yes", "--out", t.TempDir()},
+		strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
+	if code != exitPass || !strings.Contains(stdout.String(), "built into this Redfilade binary") {
+		t.Fatalf("exit %d\n%s%s", code, stdout.String(), stderr.String())
+	}
+	code = Main(context.Background(), []string{"range", "run", "no-such-scenario", "--build", "secure", "--yes"},
+		strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
+	if code != exitError {
+		t.Fatalf("unknown id should fail, got %d", code)
 	}
 }

@@ -185,6 +185,24 @@ jobs:
             --certificate-identity "https://github.com/${WORKFLOW_REF}" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
           sha256sum --check --strict proof-checksums.txt
+      - name: Sign each scenario as a pack and verify it with the CLI
+        # Phase 2: a pack signature binds the exact scenario.json bytes to this
+        # workflow identity. `redfilade pack verify` checks the same identity
+        # that `range run DIR` requires before it treats a pack as verified.
+        run: |
+          for f in scenarios/*/scenario.json; do
+            id="$(basename "$(dirname "$f")")"
+            mkdir -p "packs/$id"
+            cp "$f" "packs/$id/scenario.json"
+            cosign sign-blob --yes --bundle "packs/$id/scenario.json.sigstore.json" "packs/$id/scenario.json"
+            "$RUNNER_TEMP/redfilade" pack verify "packs/$id"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scenario-packs-${{ needs.build.outputs.version }}
+          path: packs/
+          if-no-files-found: error
+          retention-days: 90
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: range-proof-${{ needs.build.outputs.version }}
