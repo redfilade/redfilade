@@ -33,6 +33,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
 	"github.com/redfilade/redfilade/internal/domain"
@@ -243,6 +244,8 @@ type common struct {
 	confirm       string
 	allowDigests  digestList
 	allowlist     string
+	model         string
+	trials        int
 }
 
 type digestList []string
@@ -258,6 +261,8 @@ func addCommon(fs *flag.FlagSet, c *common) {
 	fs.StringVar(&c.confirm, "confirm", "", "the external pack id, confirming you want to run it unsigned")
 	fs.Var(&c.allowDigests, "allow-digest", "exact external pack digest allowed in non-interactive runs (repeatable)")
 	fs.StringVar(&c.allowlist, "allowlist", "", "file of allowed external pack digests, one per line")
+	fs.StringVar(&c.model, "model", "scripted:naive", "model for L3 agent scenarios: scripted:naive, scripted:careful or anthropic:<model-id> (needs ANTHROPIC_API_KEY)")
+	fs.IntVar(&c.trials, "trials", 0, "trials per L3 agent scenario (0 = the scenario's default, at most 50)")
 }
 
 // target is a scenario resolved from an id (built-in) or a directory (pack).
@@ -386,6 +391,10 @@ func summary(w io.Writer, label string, ev *report.Evidence) {
 		fmt.Fprintf(w, "  (%s)", strings.Join(facts, ", "))
 	}
 	fmt.Fprintln(w)
+	if a := ev.Agent; a != nil {
+		fmt.Fprintf(w, "    agent %s: hijacked in %d of %d completed trials (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+			a.Model, a.Exploited, a.Completed, a.Rate*100, a.Interval95[0]*100, a.Interval95[1]*100)
+	}
 	for _, e := range ev.Errors {
 		fmt.Fprintln(w, "    note:", report.Clean(e, 300))
 	}
@@ -411,10 +420,10 @@ func cmdRangeRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	m := t.m
 	o, tier := opts(ctx, runner, c)
-	if !approve(consent.FromManifest(m, *build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
+	if !approve(scenarioPlan(m, *build, tier, t, c), c, stdin, stdout, stderr) {
 		return exitError
 	}
-	ev, err := run.Scenario(ctx, m, *build, o)
+	ev, err := runScenario(ctx, m, *build, o, c)
 	if err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
@@ -474,10 +483,10 @@ func cmdRangeGate(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	for _, t := range targets {
 		m := t.m
 		for _, build := range []string{"vulnerable", "secure"} {
-			if !approve(consent.FromManifest(m, build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
+			if !approve(scenarioPlan(m, build, tier, t, c), c, stdin, stdout, stderr) {
 				return exitError
 			}
-			ev, err := run.Scenario(ctx, m, build, o)
+			ev, err := runScenario(ctx, m, build, o, c)
 			if err != nil {
 				fmt.Fprintln(stderr, "redfilade:", err)
 				return exitError
@@ -768,4 +777,34 @@ func cmdDomain(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	}
 	fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
 	return exitError
+}
+
+// scenarioPlan is the consent screen for one build of a scenario; agent
+// scenarios also name the model and where its data goes.
+func scenarioPlan(m *scenario.Manifest, build string, tier sandbox.Tier, t *target, c common) consent.Plan {
+	p := consent.FromManifest(m, build, tier, t.origin, t.digest, t.signature)
+	if m.Kind == "agent" {
+		p.Model = c.model
+		trials := m.Agent.Trials
+		if c.trials > 0 {
+			trials = c.trials
+		}
+		p.Trials = trials
+	}
+	return p
+}
+
+// runScenario runs one build, through the agent engine for L3 scenarios.
+func runScenario(ctx context.Context, m *scenario.Manifest, build string, o run.Options, c common) (*report.Evidence, error) {
+	if m.Kind != "agent" {
+		return run.Scenario(ctx, m, build, o)
+	}
+	if c.trials < 0 || c.trials > 50 {
+		return nil, errors.New("--trials must be 0-50")
+	}
+	model, err := agent.New(c.model)
+	if err != nil {
+		return nil, err
+	}
+	return run.Agent(ctx, m, build, model, c.trials, o)
 }

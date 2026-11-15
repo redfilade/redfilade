@@ -26,3 +26,4 @@ To propose a change, copy [`template.md`](template.md) to the next number and op
 | [0018](0018-reuse-cisco-mcp-scanner-rules.md) | Reuse Cisco MCP Scanner's detection rules with our own engine | Accepted |
 | [0019](0019-http-transport-and-remote-testing.md) | Streamable HTTP transport and testing servers by URL | Accepted |
 | [0020](0020-domain-proofs-and-address-pinning.md) | Domain proofs, live re-checks and address pinning for remote tests | Accepted |
+| [0021](0021-l3-agent-in-the-loop.md) | L3 agent-in-the-loop scenarios | Accepted |

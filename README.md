@@ -95,6 +95,7 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
 | `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
 | `l2-command-injection` | L2 | A ping tool that pastes input into a shell command, so `;` and `$(...)` read a deploy key |
+| `l3-inbox-injection` | L3 | An email asks the AI assistant to forward the inbox, including a reset code, to an outside address |
 | `l2-sql-injection` | L2 | A customer lookup that pastes input into SQL, so a quote and `UNION` read an API key from another table |
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
@@ -144,7 +145,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 |---|---|---|
 | **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
 | **L2** Security battery | Path traversal, SSRF, secrets in output, command injection, SQL injection, and over HTTP: token audience, rate limits, routing-header mismatch | Eight attacks available |
-| **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | Planned |
+| **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | First scenario available: success rate with a 95% interval |
 | **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
 | **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Planned |
 
@@ -153,7 +154,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 - [ ] **Phase 0: Foundation.** Hardened organisation, pinned least-privilege CI, secret scanning, dependency policy, threat model, multi-tenant schema, a proven signed dry-run release. Code done; maintainer setup steps in [`docs/phase-0.md`](docs/phase-0.md).
 - [ ] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. Built; the signed proof runs with the first release dry run. [`docs/phase-1.md`](docs/phase-1.md)
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. [`docs/phase-2.md`](docs/phase-2.md)
-- [ ] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks (done), domain verification and remote targets (done), L3 agent-in-the-loop testing, and the hosted service. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
+- [ ] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks (done), domain verification and remote targets (done), L3 agent-in-the-loop (first scenario done), and the hosted service. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
 - [ ] **Phase 4: Clients and defences.** L4 hostile servers that test MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set.
 
 ## Repository layout

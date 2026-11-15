@@ -12,7 +12,9 @@
 | 3a. HTTP twin (vulnerable and secure) with an end-to-end test | `targets/http-auth`, `cmd/redfilade/remote_test.go` | ✅ |
 | 3b. Domain verification (DNS TXT or HTTPS file), live re-check, public-address pinning, `redfilade domain` | `internal/domain`, `cmd/redfilade` | ✅ |
 | 3b. `test --url` for verified HTTPS domains, with end-to-end tests | `cmd/redfilade/domain_test.go` | ✅ |
-| 3c. L3 agent in the loop | | ⬜ |
+| 3c. L3 agent scenarios: agent loop, trials with a 95% interval, `agent_leaked_canary` | `internal/agent`, `internal/run` | ✅ |
+| 3c. Models: scripted stand-ins for CI, Anthropic Messages API for real runs | `internal/agent/models.go` | ✅ |
+| 3c. First L3 scenario and twins: inbox injection | `scenarios/l3-inbox-injection`, `targets/inbox-injection` | ✅ in the gate |
 | 3d. Hosted Test Bench service | | ⬜ |
 
 ## What is honest about this phase so far
