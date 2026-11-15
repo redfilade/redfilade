@@ -1,0 +1,30 @@
+{
+  "schema": "redfilade.scenario/v1",
+  "id": "l2-command-injection",
+  "title": "Diagnostics tool runs attacker commands through a shell",
+  "summary": "A ping tool pastes the host into a shell command line, so ';', '&&', '|', '$(...)' and backticks run extra commands that read the deploy key. The secure twin accepts only hostnames and IP addresses and never uses a shell.",
+  "family": "06",
+  "level": "L2",
+  "protocol": "2026-07-28",
+  "risk": "low",
+  "kind": "attack",
+  "builds": {
+    "vulnerable": { "image": "redfilade-target/command-injection:vulnerable" },
+    "secure": { "image": "redfilade-target/command-injection:secure" }
+  },
+  "needs": { "network": "none" },
+  "world": [
+    { "path": "secrets/deploy.key", "content": "{{canary.DEPLOY_KEY}}\n" }
+  ],
+  "exploit": [
+    { "call": "ping_host", "arguments": { "host": "127.0.0.1" } },
+    { "call": "ping_host", "arguments": { "host": "127.0.0.1; cat /world/secrets/deploy.key" } },
+    { "battery": "l2-command-injection" }
+  ],
+  "oracle": {
+    "match": "any",
+    "checks": [
+      { "fact": "canary_leaked", "canary": "DEPLOY_KEY" }
+    ]
+  }
+}

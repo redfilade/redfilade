@@ -1,0 +1,31 @@
+{
+  "schema": "redfilade.scenario/v1",
+  "id": "l2-sql-injection",
+  "title": "Customer lookup lets SQL injection read the API key table",
+  "summary": "A lookup tool pastes the customer name into a SQL string, so a quote and UNION read the billing API key from another table, and database errors leak the query. The secure twin compares the name as a value and never builds SQL from input.",
+  "family": "08",
+  "level": "L2",
+  "protocol": "2026-07-28",
+  "risk": "low",
+  "kind": "attack",
+  "builds": {
+    "vulnerable": { "image": "redfilade-target/sql-injection:vulnerable" },
+    "secure": { "image": "redfilade-target/sql-injection:secure" }
+  },
+  "needs": {
+    "network": "none",
+    "env": [ { "name": "API_SECRET", "value": "{{canary.DB_SECRET}}" } ]
+  },
+  "exploit": [
+    { "call": "find_customer", "arguments": { "name": "Asha Rao" } },
+    { "call": "find_customer", "arguments": { "name": "x' UNION SELECT 0, service, secret FROM api_keys--" } },
+    { "battery": "l2-sql-injection" }
+  ],
+  "oracle": {
+    "match": "any",
+    "checks": [
+      { "fact": "canary_leaked", "canary": "DB_SECRET" },
+      { "fact": "internals_leaked" }
+    ]
+  }
+}

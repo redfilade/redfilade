@@ -8,8 +8,8 @@
 |---|---|---|
 | Egress sink: per-run internal network, request log, sink canary | `infra/sink`, `internal/sandbox` | ✅ |
 | Oracle facts: `secret_pattern_leaked`, `sensitive_file_read`, `egress_reached_sink`, `canary_egressed` | `internal/oracle` | ✅ |
-| L2 battery: path traversal, SSRF, secrets in output (L2 includes L1) | `internal/battery/l2.go` | ✅ |
-| L2 twins and scenarios | `targets/{path-traversal,ssrf,secrets-in-output}`, `scenarios/l2-*` | ✅ |
+| L2 battery: path traversal, SSRF, secrets in output, command injection, SQL injection (L2 includes L1) | `internal/battery/l2.go` | ✅ |
+| L2 twins and scenarios | `targets/{path-traversal,ssrf,secrets-in-output,command-injection,sql-injection}`, `scenarios/l2-*` | ✅ |
 | SARIF rules for the new facts | `internal/report` | ✅ |
 | Built-in scenarios embedded and run by id | `scenarios/embed.go` | ✅ |
 | Pack digest, signature check and policy (ADR-0016) | `internal/pack` | ✅ |
@@ -25,7 +25,8 @@
 
 ## What is honest about this phase
 
-- Token audience and rate-limit checks from the L2 list need the HTTP transport, which comes with Phase 3. Command and SQL injection twins are not built yet.
+- Token audience and rate-limit checks from the L2 list need the HTTP transport, which comes with Phase 3.
+- The command injection twin has no real shell (its image is `FROM scratch`): its vulnerable build passes the command line to a small built-in shell emulator that is unsafe in the same way as `sh -c`. The SQL injection twin uses a small in-memory SQL engine with SQLite-style errors. Against builders' own servers, the battery uses real shell and SQL syntax.
 - The cell is still a hardened container, not a microVM (ADR-0001).
 - File reads and process execution inside the cell are still not observed directly; `sensitive_file_read` is detected from what the target returns.
 - Triage cannot run a contribution that needs a new twin until that twin is reviewed and merged.
