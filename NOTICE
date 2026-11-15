@@ -1,11 +1,13 @@
 Redfilade
-Copyright 2026 The Redfilade Authors
+Copyright 2026 Sanket Toraskar
+https://github.com/redfilade/redfilade
 
-This product includes software developed by the Redfilade project
-(https://github.com/redfilade/redfilade).
+Licensed under the PolyForm Noncommercial License 1.0.0 (see LICENSE).
+Use is subject to DISCLAIMER.md. The Redfilade name and logo are not
+licensed (see TRADEMARKS.md).
 
-The Redfilade mascot artwork (assets/brand/mascot/) was created by Sanket Toraskar.
+Versions published before 2026-11-15 were released under the Apache
+License 2.0 and remain available under it.
 
-The Redfilade wordmark is set in Fredoka with its tagline in Nunito; the flat
-vector wordmark is set in Inter Display. All three typefaces are licensed under
-the SIL Open Font License 1.1 (https://openfontlicense.org).
+The Redfilade wordmark is set in Inter Display, licensed under the
+SIL Open Font License 1.1 (https://openfontlicense.org).

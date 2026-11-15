@@ -30,6 +30,11 @@
 
 # Policy documents
 /SECURITY.md               @sankettheinventor
+/LICENSE                   @sankettheinventor
+/NOTICE                    @sankettheinventor
+/DISCLAIMER.md             @sankettheinventor
+/TRADEMARKS.md             @sankettheinventor
+/CONTRIBUTING.md           @sankettheinventor
 /docs/adr/                 @sankettheinventor
 /docs/threat-model/        @sankettheinventor
 

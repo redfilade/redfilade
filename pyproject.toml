@@ -3,7 +3,7 @@ name = "redfilade-harness"
 version = "0.0.0"
 description = "Redfilade attack harness and scenario SDK."
 readme = "harness/README.md"
-license = "Apache-2.0"
+license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = []
