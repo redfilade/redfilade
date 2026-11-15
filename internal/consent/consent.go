@@ -132,10 +132,58 @@ func (p Plan) Render() string {
 
 // Ask prints the screen and returns true only for an explicit "y" or "yes".
 // Anything else, including an empty line or end of input, is No.
-func Ask(p Plan, in io.Reader, out io.Writer) bool {
+// Screen is anything the user can be asked to approve.
+type Screen interface {
+	Render() string
+	Check() error
+}
+
+func Ask(p Screen, in io.Reader, out io.Writer) bool {
 	fmt.Fprint(out, p.Render())
 	fmt.Fprint(out, "\nRun it? [y/N] ")
 	line, _ := bufio.NewReader(io.LimitReader(in, 64)).ReadString('\n')
 	ans := strings.ToLower(strings.TrimSpace(line))
 	return ans == "y" || ans == "yes"
+}
+
+// RemotePlan is what the user agrees to before Redfilade tests a server it
+// reaches over the network. There is no cell: requests go to the URL.
+type RemotePlan struct {
+	URL      string
+	Level    string
+	Attacks  []string
+	Requests int    // upper bound on HTTP requests the run sends
+	Proof    string // why Redfilade may test this host (loopback or verified domain)
+	Token    bool   // a bearer token will be sent
+}
+
+// Check refuses remote plans that are malformed.
+func (p RemotePlan) Check() error {
+	if !strings.HasPrefix(p.URL, "http://") && !strings.HasPrefix(p.URL, "https://") {
+		return fmt.Errorf("%w: only http and https URLs can be tested", ErrRefused)
+	}
+	if p.Proof == "" {
+		return fmt.Errorf("%w: %s is neither on this machine nor a verified domain", ErrRefused, p.URL)
+	}
+	return nil
+}
+
+// Render returns the consent screen for a remote test.
+func (p RemotePlan) Render() string {
+	var b strings.Builder
+	line := func(k, v string) { fmt.Fprintf(&b, "  %-12s %s\n", k, v) }
+	b.WriteString("Redfilade is about to test an MCP server over the network.\n\n")
+	line("URL", p.URL)
+	line("Allowed by", p.Proof)
+	line("Level", p.Level)
+	line("Attacks", strings.Join(p.Attacks, ", "))
+	line("Requests", fmt.Sprintf("at most about %d, read-only payloads, nothing deleted or written on purpose", p.Requests))
+	if p.Token {
+		line("Credentials", "your token is sent to this URL only, and redacted from reports")
+	} else {
+		line("Credentials", "none")
+	}
+	line("Isolation", "none: the server runs on its own infrastructure, not in a Redfilade cell")
+	b.WriteString("\nOnly test servers you own or are authorised to test (DISCLAIMER.md).\n")
+	return b.String()
 }

@@ -277,3 +277,48 @@ func TestSQLErrorDetector(t *testing.T) {
 		t.Errorf("generic message flagged: %+v", clean)
 	}
 }
+
+func TestHTTPFacts(t *testing.T) {
+	ev := func(fact string, ex []mcp.HTTPExchange) Result {
+		return Evaluate(Input{Completed: true, Checks: []scenario.Check{{Fact: fact}}, HTTP: ex})
+	}
+	ok := mcp.HTTPExchange{Status: 200, Outcome: "result"}
+	withAuth := func(a string, e mcp.HTTPExchange) mcp.HTTPExchange { e.Auth = a; return e }
+	if r := ev("auth_bypassed", []mcp.HTTPExchange{withAuth(mcp.AuthForgedNone, ok)}); r.Verdict != Exploited || r.Findings[0].Detector != mcp.AuthForgedNone {
+		t.Errorf("forged token served: %+v", r)
+	}
+	if r := ev("auth_bypassed", []mcp.HTTPExchange{withAuth(mcp.AuthValid, ok), withAuth(mcp.AuthNone, mcp.HTTPExchange{Status: 401, Outcome: "none"})}); r.Verdict != NotExploited {
+		t.Errorf("valid token and refused probe: %+v", r)
+	}
+	if r := ev("auth_bypassed", []mcp.HTTPExchange{withAuth(mcp.AuthNone, mcp.HTTPExchange{Status: 200, Outcome: "error"})}); r.Verdict != NotExploited {
+		t.Errorf("a JSON-RPC error is not a bypass: %+v", r)
+	}
+	burst := func(n, limitedAt int) []mcp.HTTPExchange {
+		var out []mcp.HTTPExchange
+		for i := 0; i < n; i++ {
+			e := mcp.HTTPExchange{Seq: i + 1, Tag: "burst", Status: 200, Outcome: "result"}
+			if i == limitedAt {
+				e.Status, e.Outcome = 429, "none"
+			}
+			out = append(out, e)
+		}
+		return out
+	}
+	if r := ev("rate_limit_missing", burst(BurstThreshold, -1)); r.Verdict != Exploited {
+		t.Errorf("unlimited burst: %+v", r)
+	}
+	if r := ev("rate_limit_missing", burst(40, 12)); r.Verdict != NotExploited {
+		t.Errorf("limited burst: %+v", r)
+	}
+	if r := ev("rate_limit_missing", burst(BurstThreshold-1, -1)); r.Verdict != NotExploited {
+		t.Errorf("too few requests prove nothing: %+v", r)
+	}
+	mm := mcp.HTTPExchange{Tag: "mismatch", Status: 200, Outcome: "result", Method: "tools/call"}
+	if r := ev("header_mismatch_accepted", []mcp.HTTPExchange{mm}); r.Verdict != Exploited {
+		t.Errorf("mismatch served: %+v", r)
+	}
+	mm.Status, mm.Outcome = 400, "none"
+	if r := ev("header_mismatch_accepted", []mcp.HTTPExchange{mm}); r.Verdict != NotExploited {
+		t.Errorf("mismatch refused: %+v", r)
+	}
+}

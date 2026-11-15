@@ -247,7 +247,7 @@ func TestRefusesWithoutContainerRuntime(t *testing.T) {
 func TestImageIsRequired(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Main(context.Background(), []string{"test", "--server", "npx evil"}, strings.NewReader(""), &stdout, &stderr, sandbox.Runner{})
-	if code != exitError || !strings.Contains(stderr.String(), "--image is required") {
+	if code != exitError || !strings.Contains(stderr.String(), "--image or --url is required") {
 		t.Fatalf("exit %d\n%s", code, stderr.String())
 	}
 }

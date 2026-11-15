@@ -10,6 +10,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -25,19 +26,20 @@ const SchemaEvidence = "redfilade.evidence/v1"
 
 // Evidence is the full record of one run.
 type Evidence struct {
-	Schema       string          `json:"schema"`
-	RunID        string          `json:"run_id"`
-	Tool         Tool            `json:"tool"`
-	Subject      Subject         `json:"subject"`
-	Isolation    string          `json:"isolation"`
-	StartedAt    time.Time       `json:"started_at"`
-	FinishedAt   time.Time       `json:"finished_at"`
-	Oracle       oracle.Result   `json:"oracle"`
-	WorldChanges []world.Change  `json:"world_changes"`
-	Egress       []oracle.Egress `json:"egress,omitempty"`
-	Frames       []mcp.Frame     `json:"frames"`
-	Errors       []string        `json:"errors,omitempty"`
-	Signature    Signature       `json:"signature"`
+	Schema       string             `json:"schema"`
+	RunID        string             `json:"run_id"`
+	Tool         Tool               `json:"tool"`
+	Subject      Subject            `json:"subject"`
+	Isolation    string             `json:"isolation"`
+	StartedAt    time.Time          `json:"started_at"`
+	FinishedAt   time.Time          `json:"finished_at"`
+	Oracle       oracle.Result      `json:"oracle"`
+	WorldChanges []world.Change     `json:"world_changes"`
+	Egress       []oracle.Egress    `json:"egress,omitempty"`
+	HTTP         []mcp.HTTPExchange `json:"http,omitempty"`
+	Frames       []mcp.Frame        `json:"frames"`
+	Errors       []string           `json:"errors,omitempty"`
+	Signature    Signature          `json:"signature"`
 }
 
 // Tool identifies the Redfilade build that produced the evidence.
@@ -52,7 +54,8 @@ type Subject struct {
 	Mode       string `json:"mode"` // "range" or "test"
 	ScenarioID string `json:"scenario_id,omitempty"`
 	Build      string `json:"build,omitempty"`
-	Image      string `json:"image"`
+	Image      string `json:"image,omitempty"`
+	URL        string `json:"url,omitempty"` // remote targets
 	Protocol   string `json:"protocol"`
 	Level      string `json:"level"`
 	Family     string `json:"family,omitempty"`
@@ -202,6 +205,15 @@ var rules = map[string]sarifRule{
 	"tool_metadata_flagged": {ID: "RF-TOOL-POISONING", Name: "PoisonedToolMetadata",
 		ShortDescription: sarifText{"A tool description or parameter carries hidden instructions or hidden behaviour"},
 		Help:             sarifText{"Tool descriptions are read by the AI model. Describe only what the tool does; never include instructions to the model, hidden actions or requests for secrets. Detection rules: Cisco MCP Scanner (Apache-2.0)."}},
+	"auth_bypassed": {ID: "RF-AUTH-BYPASS", Name: "AuthenticationBypassed",
+		ShortDescription: sarifText{"A request without a valid token for this server was served"},
+		Help:             sarifText{"Require a bearer token on every request, verify its signature and expiry, and reject tokens whose audience is not this server (RFC 8707, MCP authorization). Return 401 with WWW-Authenticate."}},
+	"rate_limit_missing": {ID: "RF-NO-RATE-LIMIT", Name: "NoRateLimit",
+		ShortDescription: sarifText{"A burst of requests was served without any rate limiting"},
+		Help:             sarifText{"Limit requests per client and per token, and answer excess requests with 429 and Retry-After."}},
+	"header_mismatch_accepted": {ID: "RF-HEADER-MISMATCH", Name: "RoutingHeaderMismatchAccepted",
+		ShortDescription: sarifText{"A request whose Mcp-Method or Mcp-Name header disagrees with its body was served"},
+		Help:             sarifText{"Gateways route and authorise on these headers. Reject any request whose headers do not match the JSON-RPC body (MCP 2026-07-28, Streamable HTTP)."}},
 	"output_injection_flagged": {ID: "RF-OUTPUT-INJECTION", Name: "InjectionInToolOutput",
 		ShortDescription: sarifText{"Tool output carries prompt-injection or hidden-script text"},
 		Help:             sarifText{"Treat data a tool returns as untrusted. Strip or neutralise instructions, markup and terminal escape codes before returning it to the model. Detection rules: Cisco MCP Scanner (Apache-2.0)."}},
@@ -231,12 +243,21 @@ func WriteSARIF(w io.Writer, e *Evidence, version, location string) error {
 		if f.Excerpt != "" {
 			msg += ". Excerpt: " + Clean(f.Excerpt, 300)
 		}
-		msg += fmt.Sprintf(". Level %s, image %s.", e.Subject.Level, Clean(e.Subject.Image, 200))
+		target := "image " + Clean(e.Subject.Image, 200)
+		if e.Subject.URL != "" {
+			target = "URL " + Clean(e.Subject.URL, 200)
+		}
+		msg += fmt.Sprintf(". Level %s, %s.", e.Subject.Level, target)
 		results = append(results, sarifResult{RuleID: r.ID, Level: "error", Message: sarifText{msg},
 			Locations: []sarifLocation{{sarifPhysical{sarifArtifact{location}}}}})
 	}
 	var rs []sarifRule
-	for _, fact := range []string{"canary_leaked", "canary_egressed", "secret_pattern_leaked", "sensitive_file_read", "egress_reached_sink", "internals_leaked", "world_file_changed"} {
+	facts := make([]string, 0, len(rules))
+	for f := range rules {
+		facts = append(facts, f)
+	}
+	sort.Strings(facts)
+	for _, fact := range facts {
 		if used[fact] {
 			rs = append(rs, rules[fact])
 		}

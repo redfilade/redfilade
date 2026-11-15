@@ -20,6 +20,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -313,7 +315,7 @@ func isTerminal(r io.Reader) bool {
 }
 
 // approve shows the consent screen and decides.
-func approve(p consent.Plan, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
+func approve(p consent.Screen, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
 	if err := p.Check(); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return false
@@ -505,7 +507,10 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs.SetOutput(stderr)
 	var c common
 	addCommon(fs, &c)
-	image := fs.String("image", "", "container image of the MCP server under test (required)")
+	image := fs.String("image", "", "container image of the MCP server under test (stdio)")
+	url := fs.String("url", "", "URL of an MCP server reached over Streamable HTTP (on this machine, or a verified domain)")
+	tokenEnv := fs.String("token-env", "", "name of an environment variable holding the server's bearer token")
+	foreignEnv := fs.String("foreign-token-env", "", "name of an environment variable holding a valid token issued for a DIFFERENT audience (audience check)")
 	server := fs.String("server", "", `command to start the server inside the image, e.g. "node dist/index.js"`)
 	level := fs.String("level", "L1", "test level: L1, or L2 (includes L1)")
 	protocol := fs.String("protocol", "2026-07-28", "MCP protocol revision: 2026-07-28 or 2025-11-25")
@@ -515,8 +520,12 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
-	if *image == "" {
-		fmt.Fprintln(stderr, "redfilade: --image is required. Redfilade never runs a server directly on your machine; package it as a container image first.")
+	if *image != "" && *url != "" {
+		fmt.Fprintln(stderr, "redfilade: use either --image or --url, not both")
+		return exitError
+	}
+	if *image == "" && *url == "" {
+		fmt.Fprintln(stderr, "redfilade: --image or --url is required. Redfilade never runs a server directly on your machine; package it as a container image, or test one you already run with --url.")
 		return exitError
 	}
 	if *protocol != "2026-07-28" && *protocol != "2025-11-25" {
@@ -526,6 +535,9 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if len(battery.ForLevel(*level)) == 0 {
 		fmt.Fprintf(stderr, "redfilade: level %s has no attacks yet (available: L1, L2)\n", *level)
 		return exitError
+	}
+	if *url != "" {
+		return cmdTestRemote(ctx, *url, *tokenEnv, *foreignEnv, *level, *protocol, c, reportFiles{*sarif, *junit, *location}, stdin, stdout, stderr)
 	}
 	o, tier := opts(ctx, runner, c)
 	p := consent.Plan{ScenarioID: "battery-" + strings.ToLower(*level), Kind: "battery", Level: *level, Family: "multiple",
@@ -543,22 +555,29 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	summary(stdout, *image+" ["+*level+"]", ev)
-	if _, err := writeFile(c.out, "evidence-test-"+*level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+	return finishTest(ev, *image, *level, c, reportFiles{*sarif, *junit, *location}, stdout, stderr)
+}
+
+type reportFiles struct{ sarif, junit, location string }
+
+// finishTest prints the summary, writes the reports and picks the exit code.
+func finishTest(ev *report.Evidence, label, level string, c common, rf reportFiles, stdout, stderr io.Writer) int {
+	summary(stdout, label+" ["+level+"]", ev)
+	if _, err := writeFile(c.out, "evidence-test-"+level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	if *sarif != "" {
-		if _, err := writeFile(filepath.Dir(*sarif), filepath.Base(*sarif), func(w io.Writer) error {
-			return report.WriteSARIF(w, ev, version.Version, *location)
+	if rf.sarif != "" {
+		if _, err := writeFile(filepath.Dir(rf.sarif), filepath.Base(rf.sarif), func(w io.Writer) error {
+			return report.WriteSARIF(w, ev, version.Version, rf.location)
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
 		}
 	}
-	if *junit != "" {
-		if _, err := writeFile(filepath.Dir(*junit), filepath.Base(*junit), func(w io.Writer) error {
-			return report.WriteJUnit(w, "redfilade test "+*level, []report.Case{{Name: *image, Evidence: ev, WantExploited: false}})
+	if rf.junit != "" {
+		if _, err := writeFile(filepath.Dir(rf.junit), filepath.Base(rf.junit), func(w io.Writer) error {
+			return report.WriteJUnit(w, "redfilade test "+level, []report.Case{{Name: label, Evidence: ev, WantExploited: false}})
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
@@ -593,4 +612,70 @@ func splitPositional(args []string) (string, []string) {
 		return a, rest
 	}
 	return "", args
+}
+
+// cmdTestRemote tests an MCP server reached over Streamable HTTP. Only a
+// server on this machine is accepted until domain verification exists.
+func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, protocol string, c common, rf reportFiles,
+	stdin io.Reader, stdout, stderr io.Writer) int {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		fmt.Fprintln(stderr, "redfilade: --url must be an http or https URL without credentials in it")
+		return exitError
+	}
+	proof := ""
+	if isLoopback(u.Hostname()) {
+		proof = "loopback: a server on this machine"
+	}
+	if proof == "" {
+		fmt.Fprintf(stderr, "redfilade: %s is not on this machine. Testing a remote host needs a verified domain, so Redfilade never attacks a server you do not control.\n", u.Hostname())
+		return exitError
+	}
+	readEnv := func(name string) (string, bool) {
+		if name == "" {
+			return "", true
+		}
+		v := os.Getenv(name)
+		if v == "" {
+			fmt.Fprintf(stderr, "redfilade: environment variable %s is empty or not set\n", name)
+			return "", false
+		}
+		return v, true
+	}
+	token, ok := readEnv(tokenEnv)
+	if !ok {
+		return exitError
+	}
+	foreign, ok := readEnv(foreignEnv)
+	if !ok {
+		return exitError
+	}
+	attacks := run.RemoteAttacks(level)
+	if len(attacks) == 0 {
+		fmt.Fprintf(stderr, "redfilade: level %s has no remote-safe attacks\n", level)
+		return exitError
+	}
+	var ids []string
+	for _, a := range attacks {
+		ids = append(ids, a.ID)
+	}
+	p := consent.RemotePlan{URL: u.String(), Level: level, Attacks: ids, Requests: battery.RemoteRequestBudget(level), Proof: proof, Token: token != ""}
+	if !approve(p, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	ev, err := run.Remote(ctx, run.RemoteOptions{URL: u.String(), Token: token, ForeignToken: foreign}, protocol, level,
+		run.Options{Deadline: c.timeout, Version: version.Version, Commit: version.Commit})
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	return finishTest(ev, u.Redacted(), level, c, rf, stdout, stderr)
+}
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
