@@ -1,0 +1,132 @@
+# Triage lane (Phase 2). A maintainer adds the "triage" label to a pull request
+# that contributes or changes scenarios; this workflow then runs those
+# scenarios as untrusted data against the Range twins.
+#
+# Trust boundaries:
+# - The CLI and the twins are built only from the base commit. Nothing from
+#   the pull request is built, installed or executed.
+# - The pull request head is checked out into ./pr purely as data. Only
+#   regular files named scenarios/<id>/scenario.json are copied out, and the
+#   directory name must be a valid scenario id.
+# - Each contributed pack runs unsigned under the CLI's pack policy: the id is
+#   confirmed and the exact digest is allowed for this one run.
+# - Range runs never pull images, so a pack can only name twins the base build
+#   produced.
+# - No secrets, no OIDC, read-only token. Results go to the job summary (built
+#   by the trusted CLI from allow-listed fields only) and an artifact.
+# - Runs on the "labeled" event only, so new pushes need a maintainer to
+#   re-apply the label after reviewing them.
+name: triage
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    name: triage
+    if: github.event.label.name == 'triage'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+      - name: Check out the base commit (trusted code)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+      - name: Check out the pull request head (data only, never executed)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: pr
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.x"
+          cache: false
+      - name: Build the CLI and the twins from the base commit
+        working-directory: trusted
+        env:
+          GOFLAGS: -mod=readonly -trimpath
+          GOTOOLCHAIN: local
+          CGO_ENABLED: "0"
+        run: |
+          go build -o "$RUNNER_TEMP/redfilade" ./cmd/redfilade
+          scripts/build-targets.sh
+      - name: Collect contributed or changed scenarios
+        id: collect
+        run: |
+          mkdir -p "$RUNNER_TEMP/packs"
+          count=0
+          for f in pr/scenarios/*/scenario.json; do
+            [ -e "$f" ] || continue
+            name="$(basename "$(dirname "$f")")"
+            if ! printf '%s' "$name" | grep -Eq '^[a-z0-9][a-z0-9-]{2,63}$'; then
+              echo "::warning::skipping a scenario directory with an invalid name"
+              continue
+            fi
+            if [ -L "$f" ] || [ -L "$(dirname "$f")" ] || [ ! -f "$f" ]; then
+              echo "::warning::skipping $name: not a regular file"
+              continue
+            fi
+            if [ -f "trusted/scenarios/$name/scenario.json" ] && cmp -s "$f" "trusted/scenarios/$name/scenario.json"; then
+              continue
+            fi
+            count=$((count + 1))
+            if [ "$count" -gt 10 ]; then
+              echo "::error::more than 10 changed scenarios; split the pull request"
+              exit 1
+            fi
+            mkdir -p "$RUNNER_TEMP/packs/$name"
+            head -c 262144 "$f" > "$RUNNER_TEMP/packs/$name/scenario.json"
+          done
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+      - name: Run each pack in the Range (unsigned, confirmed, digest-pinned)
+        if: steps.collect.outputs.count != '0'
+        run: |
+          status=0
+          for dir in "$RUNNER_TEMP"/packs/*/; do
+            dir="${dir%/}"
+            name="$(basename "$dir")"
+            digest="$("$RUNNER_TEMP/redfilade" pack digest "$dir")" || { status=1; continue; }
+            "$RUNNER_TEMP/redfilade" range gate "$dir" --yes \
+              --allow-unsigned --confirm "$name" --allow-digest "$digest" \
+              --out "triage-results/$name" --junit "triage-results/$name/range-gate.xml" || status=1
+          done
+          exit "$status"
+      - name: Summarize (trusted CLI, allow-listed fields only)
+        if: always() && steps.collect.outputs.count != '0'
+        run: |
+          for dir in triage-results/*/; do
+            [ -d "$dir" ] || continue
+            "$RUNNER_TEMP/redfilade" triage summarize "$dir" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Nothing to triage
+        if: steps.collect.outputs.count == '0'
+        run: echo "No contributed or changed scenarios in this pull request." >> "$GITHUB_STEP_SUMMARY"
+      - name: No canary value may appear in any output
+        if: always() && steps.collect.outputs.count != '0'
+        run: |
+          if [ -d triage-results ] && grep -rEo 'CANARY_[A-Z0-9_]+_[A-Z2-7]{26}' triage-results; then
+            echo "::error::raw canary found in triage output"
+            exit 1
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.collect.outputs.count != '0'
+        with:
+          name: triage-${{ github.event.pull_request.number }}
+          path: triage-results/
+          if-no-files-found: warn
+          retention-days: 14

@@ -4,6 +4,7 @@
 //	redfilade scenario list
 //	redfilade scenario validate [DIR...]
 //	redfilade pack digest DIR | pack verify DIR
+//	redfilade triage summarize DIR
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
@@ -33,6 +34,7 @@ import (
 	"github.com/redfilade/redfilade/internal/run"
 	"github.com/redfilade/redfilade/internal/sandbox"
 	"github.com/redfilade/redfilade/internal/scenario"
+	"github.com/redfilade/redfilade/internal/triage"
 	"github.com/redfilade/redfilade/internal/version"
 	"github.com/redfilade/redfilade/scenarios"
 )
@@ -74,6 +76,20 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		}
 		usage(stderr)
 		return exitError
+	case "triage":
+		if len(args) == 3 && args[1] == "summarize" {
+			rows, skipped, err := triage.Load(args[2])
+			if err != nil {
+				fmt.Fprintln(stderr, "redfilade: cannot read evidence directory")
+				return exitError
+			}
+			if err := triage.Markdown(stdout, rows, skipped); err != nil {
+				return exitError
+			}
+			return exitPass
+		}
+		usage(stderr)
+		return exitError
 	case "range":
 		if len(args) < 2 {
 			usage(stderr)
@@ -104,6 +120,7 @@ Usage:
   redfilade scenario validate [DIR...]
   redfilade pack digest DIR
   redfilade pack verify DIR
+  redfilade triage summarize DIR
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]

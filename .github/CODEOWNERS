@@ -22,6 +22,9 @@
 # Security-critical code
 /harness/                  @sankettheinventor
 /internal/oracle/          @sankettheinventor
+/internal/pack/            @sankettheinventor
+/internal/triage/          @sankettheinventor
+/infra/                    @sankettheinventor
 /internal/signing/         @sankettheinventor
 /db/migrations/            @sankettheinventor
 
