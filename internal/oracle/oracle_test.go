@@ -257,3 +257,23 @@ func TestRuleScanBudget(t *testing.T) {
 		t.Fatalf("budget should be reported: %v", got.NotObserved)
 	}
 }
+
+func TestSQLErrorDetector(t *testing.T) {
+	check := []scenario.Check{{Fact: "internals_leaked"}}
+	for _, msg := range []string{
+		`database error: near "garbage": syntax error`,
+		`unrecognized token: "'x"`,
+		`ERROR: syntax error at or near "OR"`,
+		`You have an error in your SQL syntax; check the manual`,
+		`ORA-00933: SQL command not properly ended`,
+	} {
+		got := Evaluate(Input{Completed: true, Checks: check, Frames: []mcp.Frame{frame(2, mcp.DirServerToClient, errorReply(msg))}})
+		if got.Verdict != Exploited || got.Findings[0].Detector != "sql-error" {
+			t.Errorf("%q: %+v", msg, got)
+		}
+	}
+	clean := Evaluate(Input{Completed: true, Checks: check, Frames: []mcp.Frame{frame(2, mcp.DirServerToClient, errorReply("no customer found"))}})
+	if clean.Verdict != NotExploited {
+		t.Errorf("generic message flagged: %+v", clean)
+	}
+}

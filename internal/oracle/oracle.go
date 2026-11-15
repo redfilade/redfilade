@@ -78,6 +78,8 @@ var detectors = []detector{
 	{"source-path", regexp.MustCompile(`(?:/home|/root|/usr/src|/app|/srv|/opt|/workspace)/[\w./-]+\.(?:py|go|js|mjs|ts|java|rb|rs|cs|php)\b`)},
 	{"windows-path", regexp.MustCompile(`[A-Za-z]:\\(?:Users|Program Files|inetpub)\\`)},
 	{"connection-string", regexp.MustCompile(`(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://[^\s"'<>]{3,}`)},
+	// Database error messages: they reveal query structure and confirm injection.
+	{"sql-error", regexp.MustCompile(`near "[^"\n]{0,80}": syntax error|unrecognized token: "|no such (?:column|table): |SQLITE_ERROR|SELECTs to the left and right of UNION|You have an error in your SQL syntax|syntax error at or near "|unterminated quoted string at or near|ORA-[0-9]{5}:|SQLSTATE\[[0-9A-Z]{5}\]|Unclosed quotation mark after the character string`)},
 }
 
 // secretDetectors find well-known credential formats in replies. Patterns are

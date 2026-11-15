@@ -87,6 +87,8 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-ssrf` | L2 | A "fetch a preview" tool tricked into calling a server it should not reach |
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
 | `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
+| `l2-command-injection` | L2 | A ping tool that pastes input into a shell command, so `;` and `$(...)` read a deploy key |
+| `l2-sql-injection` | L2 | A customer lookup that pastes input into SQL, so a quote and `UNION` read an API key from another table |
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
 
@@ -134,7 +136,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 | Level | Checks | Status |
 |---|---|---|
 | **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
-| **L2** Security battery | Path traversal, SSRF, secrets in output, then injection, token audience, rate limits | Three attacks available |
+| **L2** Security battery | Path traversal, SSRF, secrets in output, command injection, SQL injection, then token audience and rate limits | Five attacks available |
 | **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | Planned |
 | **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
 | **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Planned |

