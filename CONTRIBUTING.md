@@ -28,8 +28,17 @@ go build ./...
 ## Commit rules
 
 - **Sign your commits** with an SSH or GPG key. `main` only accepts verified commits. GitHub's guide: [signing commits](https://docs.github.com/en/authentication/managing-commit-signature-verification/signing-commits).
-- **Sign off your commits** (`git commit -s`) to certify the [Developer Certificate of Origin](https://developercertificate.org/): that you wrote the change or have the right to submit it under the Apache-2.0 licence.
+- **Sign off your commits** (`git commit -s`) to certify the [Developer Certificate of Origin](https://developercertificate.org/): that you wrote the change or have the right to submit it under the terms below.
 - Keep commits focused and messages descriptive.
+
+## Licensing of your contribution
+
+Redfilade is source-available under your choice of the PolyForm Noncommercial or PolyForm Internal Use license ([`LICENSE`](LICENSE)), and its use is governed by [`DISCLAIMER.md`](DISCLAIMER.md). By submitting a contribution you agree that:
+
+- everyone may use your contribution under the project's licenses; and
+- you also license your contribution to the licensor, Sanket Toraskar, under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), so the project can keep maintaining, relicensing and operating Redfilade without asking every contributor again.
+
+You keep the copyright in your contribution. Only contribute attacks for learning and defence, and never include real credentials, personal data or working attacks against systems you do not own.
 
 ## Pull requests
 

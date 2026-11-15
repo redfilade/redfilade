@@ -23,6 +23,7 @@
 /harness/                  @sankettheinventor
 /internal/oracle/          @sankettheinventor
 /internal/pack/            @sankettheinventor
+/internal/rules/           @sankettheinventor
 /internal/triage/          @sankettheinventor
 /infra/                    @sankettheinventor
 /internal/signing/         @sankettheinventor
@@ -30,6 +31,11 @@
 
 # Policy documents
 /SECURITY.md               @sankettheinventor
+/LICENSE                   @sankettheinventor
+/NOTICE                    @sankettheinventor
+/DISCLAIMER.md             @sankettheinventor
+/TRADEMARKS.md             @sankettheinventor
+/CONTRIBUTING.md           @sankettheinventor
 /docs/adr/                 @sankettheinventor
 /docs/threat-model/        @sankettheinventor
 

@@ -22,3 +22,5 @@ To propose a change, copy [`template.md`](template.md) to the next number and op
 | [0014](0014-synthetic-org-and-canaries.md) | A fresh synthetic organisation with random canaries for every run | Accepted |
 | [0015](0015-local-isolation-and-consent.md) | Local isolation tiers and a consent gate | Accepted |
 | [0016](0016-scenario-packs-and-triage-lane.md) | Signed scenario packs and an isolated triage lane | Accepted |
+| [0017](0017-source-available-noncommercial-license.md) | Source-available license: noncommercial or internal use | Accepted |
+| [0018](0018-reuse-cisco-mcp-scanner-rules.md) | Reuse Cisco MCP Scanner's detection rules with our own engine | Accepted |

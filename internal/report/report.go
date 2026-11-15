@@ -199,6 +199,12 @@ var rules = map[string]sarifRule{
 	"canary_egressed": {ID: "RF-EXFILTRATION", Name: "SecretSentToNetwork",
 		ShortDescription: sarifText{"A planted secret was sent to an external address"},
 		Help:             sarifText{"The server sent a secret to an attacker-controlled destination."}},
+	"tool_metadata_flagged": {ID: "RF-TOOL-POISONING", Name: "PoisonedToolMetadata",
+		ShortDescription: sarifText{"A tool description or parameter carries hidden instructions or hidden behaviour"},
+		Help:             sarifText{"Tool descriptions are read by the AI model. Describe only what the tool does; never include instructions to the model, hidden actions or requests for secrets. Detection rules: Cisco MCP Scanner (Apache-2.0)."}},
+	"output_injection_flagged": {ID: "RF-OUTPUT-INJECTION", Name: "InjectionInToolOutput",
+		ShortDescription: sarifText{"Tool output carries prompt-injection or hidden-script text"},
+		Help:             sarifText{"Treat data a tool returns as untrusted. Strip or neutralise instructions, markup and terminal escape codes before returning it to the model. Detection rules: Cisco MCP Scanner (Apache-2.0)."}},
 }
 
 // WriteSARIF writes findings as SARIF 2.1.0. location is the repository path
