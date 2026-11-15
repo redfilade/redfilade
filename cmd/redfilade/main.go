@@ -5,6 +5,7 @@
 //	redfilade scenario validate [DIR...]
 //	redfilade pack digest DIR | pack verify DIR
 //	redfilade triage summarize DIR
+//	redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
@@ -16,11 +17,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/netip"
 	neturl "net/url"
 	"os"
 	"os/signal"
@@ -30,6 +35,7 @@ import (
 
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
+	"github.com/redfilade/redfilade/internal/domain"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/pack"
 	"github.com/redfilade/redfilade/internal/report"
@@ -78,6 +84,8 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		}
 		usage(stderr)
 		return exitError
+	case "domain":
+		return cmdDomain(ctx, args[1:], stdout, stderr)
 	case "triage":
 		if len(args) == 3 && args[1] == "summarize" {
 			rows, skipped, err := triage.Load(args[2])
@@ -123,6 +131,9 @@ Usage:
   redfilade pack digest DIR
   redfilade pack verify DIR
   redfilade triage summarize DIR
+  redfilade domain challenge DOMAIN
+  redfilade domain verify DOMAIN
+  redfilade domain list
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
@@ -624,12 +635,33 @@ func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, pro
 		return exitError
 	}
 	proof := ""
+	var hc *http.Client
 	if isLoopback(u.Hostname()) {
 		proof = "loopback: a server on this machine"
-	}
-	if proof == "" {
-		fmt.Fprintf(stderr, "redfilade: %s is not on this machine. Testing a remote host needs a verified domain, so Redfilade never attacks a server you do not control.\n", u.Hostname())
-		return exitError
+	} else {
+		if u.Scheme != "https" {
+			fmt.Fprintln(stderr, "redfilade: remote hosts must be tested over https")
+			return exitError
+		}
+		v, err := domainVerifier()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		rec, err := v.Authorize(ctx, u.Hostname())
+		if err != nil {
+			fmt.Fprintf(stderr, "redfilade: %v\nRedfilade only tests remote servers on domains you have proven you control.\n", err)
+			return exitError
+		}
+		dial, pinned, err := domain.PinnedDialer(ctx, u.Hostname(), lookupNetIP, allowAddr)
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		tr := &http.Transport{DialContext: dial, Proxy: nil, TLSClientConfig: &tls.Config{RootCAs: remoteRootCAs, MinVersion: tls.VersionTLS12},
+			ForceAttemptHTTP2: true, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConnsPerHost: 8}
+		hc = &http.Client{Transport: tr}
+		proof = fmt.Sprintf("verified domain %s (%s proof, re-checked just now), connecting only to %s", rec.Domain, rec.Method, pinned)
 	}
 	readEnv := func(name string) (string, bool) {
 		if name == "" {
@@ -663,7 +695,7 @@ func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, pro
 	if !approve(p, c, stdin, stdout, stderr) {
 		return exitError
 	}
-	ev, err := run.Remote(ctx, run.RemoteOptions{URL: u.String(), Token: token, ForeignToken: foreign}, protocol, level,
+	ev, err := run.Remote(ctx, run.RemoteOptions{URL: u.String(), Token: token, ForeignToken: foreign, HTTPClient: hc}, protocol, level,
 		run.Options{Deadline: c.timeout, Version: version.Version, Commit: version.Commit})
 	if err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
@@ -678,4 +710,62 @@ func isLoopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// Seams for tests: how domains are verified and resolved, which addresses are
+// acceptable, and which roots are trusted for TLS (nil = system roots).
+var (
+	domainVerifier = domain.NewVerifier
+	lookupNetIP    func(ctx context.Context, host string) ([]netip.Addr, error)
+	allowAddr      func(netip.Addr) bool
+	remoteRootCAs  *x509.CertPool
+)
+
+func cmdDomain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (args[0] != "list" && len(args) != 2) {
+		fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+		return exitError
+	}
+	v, err := domainVerifier()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	switch args[0] {
+	case "challenge":
+		r, err := v.Challenge(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		fmt.Fprintf(stdout, "Prove you control %s by publishing this token in ONE of these places:\n\n", r.Domain)
+		fmt.Fprintf(stdout, "  DNS TXT record   %s%s\n                   value: %s\n                   (covers %s and all its subdomains)\n\n", domain.DNSPrefix, r.Domain, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "  HTTPS file       https://%s%s\n                   body:  %s\n                   (covers %s only)\n\n", r.Domain, domain.WellKnownPath, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "Then run: redfilade domain verify %s\n", r.Domain)
+		return exitPass
+	case "verify":
+		r, err := v.Verify(ctx, args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitFindings
+		}
+		fmt.Fprintf(stdout, "verified %s with a %s proof. Keep the proof published: it is checked again before every remote test.\n", r.Domain, r.Method)
+		return exitPass
+	case "list":
+		rs, err := v.List()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		for _, r := range rs {
+			state := "pending"
+			if !r.VerifiedAt.IsZero() {
+				state = "verified (" + r.Method + ", " + r.VerifiedAt.Format(time.RFC3339) + ")"
+			}
+			fmt.Fprintf(stdout, "%-40s %s\n", r.Domain, state)
+		}
+		return exitPass
+	}
+	fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+	return exitError
 }
