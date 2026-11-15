@@ -5,6 +5,7 @@
 //	redfilade scenario validate [DIR...]
 //	redfilade pack digest DIR | pack verify DIR
 //	redfilade triage summarize DIR
+//	redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
@@ -16,10 +17,16 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -28,6 +35,7 @@ import (
 
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
+	"github.com/redfilade/redfilade/internal/domain"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/pack"
 	"github.com/redfilade/redfilade/internal/report"
@@ -76,6 +84,8 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		}
 		usage(stderr)
 		return exitError
+	case "domain":
+		return cmdDomain(ctx, args[1:], stdout, stderr)
 	case "triage":
 		if len(args) == 3 && args[1] == "summarize" {
 			rows, skipped, err := triage.Load(args[2])
@@ -121,6 +131,9 @@ Usage:
   redfilade pack digest DIR
   redfilade pack verify DIR
   redfilade triage summarize DIR
+  redfilade domain challenge DOMAIN
+  redfilade domain verify DOMAIN
+  redfilade domain list
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
@@ -313,7 +326,7 @@ func isTerminal(r io.Reader) bool {
 }
 
 // approve shows the consent screen and decides.
-func approve(p consent.Plan, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
+func approve(p consent.Screen, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
 	if err := p.Check(); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return false
@@ -505,7 +518,10 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs.SetOutput(stderr)
 	var c common
 	addCommon(fs, &c)
-	image := fs.String("image", "", "container image of the MCP server under test (required)")
+	image := fs.String("image", "", "container image of the MCP server under test (stdio)")
+	url := fs.String("url", "", "URL of an MCP server reached over Streamable HTTP (on this machine, or a verified domain)")
+	tokenEnv := fs.String("token-env", "", "name of an environment variable holding the server's bearer token")
+	foreignEnv := fs.String("foreign-token-env", "", "name of an environment variable holding a valid token issued for a DIFFERENT audience (audience check)")
 	server := fs.String("server", "", `command to start the server inside the image, e.g. "node dist/index.js"`)
 	level := fs.String("level", "L1", "test level: L1, or L2 (includes L1)")
 	protocol := fs.String("protocol", "2026-07-28", "MCP protocol revision: 2026-07-28 or 2025-11-25")
@@ -515,8 +531,12 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
-	if *image == "" {
-		fmt.Fprintln(stderr, "redfilade: --image is required. Redfilade never runs a server directly on your machine; package it as a container image first.")
+	if *image != "" && *url != "" {
+		fmt.Fprintln(stderr, "redfilade: use either --image or --url, not both")
+		return exitError
+	}
+	if *image == "" && *url == "" {
+		fmt.Fprintln(stderr, "redfilade: --image or --url is required. Redfilade never runs a server directly on your machine; package it as a container image, or test one you already run with --url.")
 		return exitError
 	}
 	if *protocol != "2026-07-28" && *protocol != "2025-11-25" {
@@ -526,6 +546,9 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if len(battery.ForLevel(*level)) == 0 {
 		fmt.Fprintf(stderr, "redfilade: level %s has no attacks yet (available: L1, L2)\n", *level)
 		return exitError
+	}
+	if *url != "" {
+		return cmdTestRemote(ctx, *url, *tokenEnv, *foreignEnv, *level, *protocol, c, reportFiles{*sarif, *junit, *location}, stdin, stdout, stderr)
 	}
 	o, tier := opts(ctx, runner, c)
 	p := consent.Plan{ScenarioID: "battery-" + strings.ToLower(*level), Kind: "battery", Level: *level, Family: "multiple",
@@ -543,22 +566,29 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	summary(stdout, *image+" ["+*level+"]", ev)
-	if _, err := writeFile(c.out, "evidence-test-"+*level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+	return finishTest(ev, *image, *level, c, reportFiles{*sarif, *junit, *location}, stdout, stderr)
+}
+
+type reportFiles struct{ sarif, junit, location string }
+
+// finishTest prints the summary, writes the reports and picks the exit code.
+func finishTest(ev *report.Evidence, label, level string, c common, rf reportFiles, stdout, stderr io.Writer) int {
+	summary(stdout, label+" ["+level+"]", ev)
+	if _, err := writeFile(c.out, "evidence-test-"+level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	if *sarif != "" {
-		if _, err := writeFile(filepath.Dir(*sarif), filepath.Base(*sarif), func(w io.Writer) error {
-			return report.WriteSARIF(w, ev, version.Version, *location)
+	if rf.sarif != "" {
+		if _, err := writeFile(filepath.Dir(rf.sarif), filepath.Base(rf.sarif), func(w io.Writer) error {
+			return report.WriteSARIF(w, ev, version.Version, rf.location)
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
 		}
 	}
-	if *junit != "" {
-		if _, err := writeFile(filepath.Dir(*junit), filepath.Base(*junit), func(w io.Writer) error {
-			return report.WriteJUnit(w, "redfilade test "+*level, []report.Case{{Name: *image, Evidence: ev, WantExploited: false}})
+	if rf.junit != "" {
+		if _, err := writeFile(filepath.Dir(rf.junit), filepath.Base(rf.junit), func(w io.Writer) error {
+			return report.WriteJUnit(w, "redfilade test "+level, []report.Case{{Name: label, Evidence: ev, WantExploited: false}})
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
@@ -593,4 +623,149 @@ func splitPositional(args []string) (string, []string) {
 		return a, rest
 	}
 	return "", args
+}
+
+// cmdTestRemote tests an MCP server reached over Streamable HTTP. Only a
+// server on this machine is accepted until domain verification exists.
+func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, protocol string, c common, rf reportFiles,
+	stdin io.Reader, stdout, stderr io.Writer) int {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		fmt.Fprintln(stderr, "redfilade: --url must be an http or https URL without credentials in it")
+		return exitError
+	}
+	proof := ""
+	var hc *http.Client
+	if isLoopback(u.Hostname()) {
+		proof = "loopback: a server on this machine"
+	} else {
+		if u.Scheme != "https" {
+			fmt.Fprintln(stderr, "redfilade: remote hosts must be tested over https")
+			return exitError
+		}
+		v, err := domainVerifier()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		rec, err := v.Authorize(ctx, u.Hostname())
+		if err != nil {
+			fmt.Fprintf(stderr, "redfilade: %v\nRedfilade only tests remote servers on domains you have proven you control.\n", err)
+			return exitError
+		}
+		dial, pinned, err := domain.PinnedDialer(ctx, u.Hostname(), lookupNetIP, allowAddr)
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		tr := &http.Transport{DialContext: dial, Proxy: nil, TLSClientConfig: &tls.Config{RootCAs: remoteRootCAs, MinVersion: tls.VersionTLS12},
+			ForceAttemptHTTP2: true, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConnsPerHost: 8}
+		hc = &http.Client{Transport: tr}
+		proof = fmt.Sprintf("verified domain %s (%s proof, re-checked just now), connecting only to %s", rec.Domain, rec.Method, pinned)
+	}
+	readEnv := func(name string) (string, bool) {
+		if name == "" {
+			return "", true
+		}
+		v := os.Getenv(name)
+		if v == "" {
+			fmt.Fprintf(stderr, "redfilade: environment variable %s is empty or not set\n", name)
+			return "", false
+		}
+		return v, true
+	}
+	token, ok := readEnv(tokenEnv)
+	if !ok {
+		return exitError
+	}
+	foreign, ok := readEnv(foreignEnv)
+	if !ok {
+		return exitError
+	}
+	attacks := run.RemoteAttacks(level)
+	if len(attacks) == 0 {
+		fmt.Fprintf(stderr, "redfilade: level %s has no remote-safe attacks\n", level)
+		return exitError
+	}
+	var ids []string
+	for _, a := range attacks {
+		ids = append(ids, a.ID)
+	}
+	p := consent.RemotePlan{URL: u.String(), Level: level, Attacks: ids, Requests: battery.RemoteRequestBudget(level), Proof: proof, Token: token != ""}
+	if !approve(p, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	ev, err := run.Remote(ctx, run.RemoteOptions{URL: u.String(), Token: token, ForeignToken: foreign, HTTPClient: hc}, protocol, level,
+		run.Options{Deadline: c.timeout, Version: version.Version, Commit: version.Commit})
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	return finishTest(ev, u.Redacted(), level, c, rf, stdout, stderr)
+}
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Seams for tests: how domains are verified and resolved, which addresses are
+// acceptable, and which roots are trusted for TLS (nil = system roots).
+var (
+	domainVerifier = domain.NewVerifier
+	lookupNetIP    func(ctx context.Context, host string) ([]netip.Addr, error)
+	allowAddr      func(netip.Addr) bool
+	remoteRootCAs  *x509.CertPool
+)
+
+func cmdDomain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (args[0] != "list" && len(args) != 2) {
+		fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+		return exitError
+	}
+	v, err := domainVerifier()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	switch args[0] {
+	case "challenge":
+		r, err := v.Challenge(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		fmt.Fprintf(stdout, "Prove you control %s by publishing this token in ONE of these places:\n\n", r.Domain)
+		fmt.Fprintf(stdout, "  DNS TXT record   %s%s\n                   value: %s\n                   (covers %s and all its subdomains)\n\n", domain.DNSPrefix, r.Domain, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "  HTTPS file       https://%s%s\n                   body:  %s\n                   (covers %s only)\n\n", r.Domain, domain.WellKnownPath, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "Then run: redfilade domain verify %s\n", r.Domain)
+		return exitPass
+	case "verify":
+		r, err := v.Verify(ctx, args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitFindings
+		}
+		fmt.Fprintf(stdout, "verified %s with a %s proof. Keep the proof published: it is checked again before every remote test.\n", r.Domain, r.Method)
+		return exitPass
+	case "list":
+		rs, err := v.List()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		for _, r := range rs {
+			state := "pending"
+			if !r.VerifiedAt.IsZero() {
+				state = "verified (" + r.Method + ", " + r.VerifiedAt.Format(time.RFC3339) + ")"
+			}
+			fmt.Fprintf(stdout, "%-40s %s\n", r.Domain, state)
+		}
+		return exitPass
+	}
+	fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+	return exitError
 }

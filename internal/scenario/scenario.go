@@ -134,6 +134,10 @@ var Facts = map[string]bool{
 	// Rule-based facts (internal/rules, Cisco MCP Scanner rules).
 	"tool_metadata_flagged":    true, // a tool description or parameter text matches a detection rule
 	"output_injection_flagged": true, // tool output carries prompt-injection, coercion or hidden-script text
+	// HTTP facts (targets reached over Streamable HTTP).
+	"auth_bypassed":            true, // a request with a missing, malformed, forged or wrong-audience token got a result
+	"rate_limit_missing":       true, // a burst of requests was all served, with no 429 or 503
+	"header_mismatch_accepted": true, // a request whose Mcp-Method or Mcp-Name header disagrees with its body got a result
 }
 
 // SinkCanary is planted automatically in every scenario that uses the sink;

@@ -8,8 +8,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redfilade/redfilade/internal/battery"
@@ -84,7 +86,12 @@ func Scenario(ctx context.Context, m *scenario.Manifest, build string, o Options
 // Target runs a level's battery against a builder's own server image.
 // Levels are cumulative (L2 includes L1).
 func Target(ctx context.Context, image string, cmd []string, protocol, level string, o Options) (*report.Evidence, error) {
-	attacks := battery.ForLevel(level)
+	var attacks []battery.Attack
+	for _, a := range battery.ForLevel(level) {
+		if !a.HTTPOnly { // a container target is reached over stdio
+			attacks = append(attacks, a)
+		}
+	}
 	if len(attacks) == 0 {
 		return nil, fmt.Errorf("no battery attacks exist for %s yet", level)
 	}
@@ -259,4 +266,117 @@ func renderValue(v any, canaries map[string]string) any {
 	default:
 		return v
 	}
+}
+
+// RemoteOptions describe a target reached over Streamable HTTP.
+type RemoteOptions struct {
+	URL          string
+	Token        string // the target's bearer token, if it needs one
+	ForeignToken string // a valid token for another audience, optional
+	HTTPClient   *http.Client
+}
+
+// RemoteAttacks returns the attacks at a level that are safe for a live
+// server reached by URL.
+func RemoteAttacks(level string) []battery.Attack {
+	var out []battery.Attack
+	for _, a := range battery.ForLevel(level) {
+		if a.Remote {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// Remote runs the remote-safe battery against an MCP server over HTTP. There
+// is no cell: the caller is responsible for only pointing it at servers the
+// user owns (loopback, or a verified domain).
+func Remote(ctx context.Context, r RemoteOptions, protocol, level string, o Options) (*report.Evidence, error) {
+	attacks := RemoteAttacks(level)
+	if len(attacks) == 0 {
+		return nil, fmt.Errorf("no remote-safe attacks exist for %s", level)
+	}
+	var checks []scenario.Check
+	seen := map[string]bool{}
+	for _, a := range attacks {
+		for _, c := range a.Checks {
+			key := c.Fact + "|" + c.Canary + "|" + c.Path
+			if !seen[key] {
+				seen[key] = true
+				checks = append(checks, c)
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, o.deadline())
+	defer cancel()
+	proto := mcp.Protocol2026
+	if protocol == mcp.Protocol2025 {
+		proto = mcp.Protocol2025
+	}
+	ev := &report.Evidence{
+		Schema:    report.SchemaEvidence,
+		RunID:     NewRunID(),
+		Tool:      report.Tool{Name: "redfilade", Version: o.Version, Commit: o.Commit},
+		Subject:   report.Subject{Mode: "test", URL: r.URL, Protocol: proto, Level: level},
+		Isolation: "remote (no cell: the target runs on its own infrastructure)",
+		StartedAt: time.Now().UTC(),
+		Signature: report.Unsigned,
+	}
+	client, tr := mcp.DialHTTP(mcp.HTTPOptions{URL: r.URL, Token: r.Token, ForeignToken: r.ForeignToken, HTTPClient: r.HTTPClient},
+		mcp.Options{Protocol: proto, ClientVersion: o.Version})
+	env := battery.Env{HTTP: tr}
+	completed := false
+	func() {
+		if _, err := client.Connect(ctx); err != nil {
+			ev.Errors = append(ev.Errors, "connect: "+err.Error())
+			return
+		}
+		tools, err := client.ListTools(ctx)
+		if err != nil {
+			ev.Errors = append(ev.Errors, "tools/list: "+err.Error())
+			return
+		}
+		for _, a := range attacks {
+			if err := a.Run(ctx, client, tools, env); err != nil {
+				ev.Errors = append(ev.Errors, a.ID+": "+err.Error())
+				return
+			}
+		}
+		completed = true
+	}()
+	tr.Close()
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		ev.Errors = append(ev.Errors, "run deadline exceeded")
+	}
+	secrets := map[string]string{}
+	if r.Token != "" {
+		secrets["TOKEN"] = r.Token
+	}
+	if r.ForeignToken != "" {
+		secrets["FOREIGN_TOKEN"] = r.ForeignToken
+	}
+	frames := client.Recorder().Frames()
+	ex := client.Recorder().HTTP()
+	ev.Oracle = oracle.Evaluate(oracle.Input{Frames: frames, Checks: checks, Match: "any", Completed: completed, Network: "remote", HTTP: ex})
+	ev.Oracle.NotObserved = []string{
+		"anything inside the target's own infrastructure: Redfilade sees only what the server returns over HTTP",
+		"file, process and network activity on the server (no cell, no egress sink)",
+	}
+	ev.WorldChanges = []world.Change{}
+	ev.Frames = report.RedactFrames(frames, secrets)
+	ev.HTTP = make([]mcp.HTTPExchange, len(ex))
+	for i, e := range ex {
+		// Header values come from the target: clean them like any other text.
+		e.Name = report.Clean(e.Name, 200)
+		e.RetryAfter = report.Clean(e.RetryAfter, 64)
+		e.WWWAuthenticate = report.Clean(e.WWWAuthenticate, 300)
+		ev.HTTP[i] = e
+	}
+	for i := range ev.Errors {
+		for name, v := range secrets {
+			ev.Errors[i] = strings.ReplaceAll(ev.Errors[i], v, "[secret:"+name+"]")
+		}
+	}
+	ev.FinishedAt = time.Now().UTC()
+	return ev, nil
 }

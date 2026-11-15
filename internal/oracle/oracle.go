@@ -4,6 +4,7 @@ package oracle
 
 import (
 	"encoding/json"
+	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -59,7 +60,12 @@ type Input struct {
 	Match     string // "any" or "all"
 	Completed bool   // every exploit step ran
 	Network   string // "none" or "sink"
+	HTTP      []mcp.HTTPExchange
 }
+
+// BurstThreshold is how many served requests in a burst, with none limited,
+// count as a missing rate limit.
+const BurstThreshold = 30
 
 // detector is a named, linear-time (RE2) pattern for runtime internals.
 type detector struct {
@@ -176,6 +182,41 @@ func Evaluate(in Input) Result {
 						got = append(got, Finding{Fact: c.Fact, Detector: d.name, FrameSeq: s.seq, Excerpt: excerpt(redact(s.text), redact(s.text[loc[0]:loc[1]]))})
 					}
 				}
+			}
+		case "auth_bypassed":
+			for _, e := range in.HTTP {
+				if e.Auth != "" && e.Auth != mcp.AuthValid && e.Status >= 200 && e.Status < 300 && e.Outcome == "result" {
+					got = append(got, Finding{Fact: c.Fact, Detector: e.Auth, FrameSeq: e.Seq,
+						Excerpt: fmt.Sprintf("HTTP %d and a result for %s sent with a %s credential", e.Status, e.Method, e.Auth)})
+				}
+			}
+		case "header_mismatch_accepted":
+			for _, e := range in.HTTP {
+				if e.Tag == "mismatch" && e.Status >= 200 && e.Status < 300 && e.Outcome == "result" {
+					got = append(got, Finding{Fact: c.Fact, Detector: "routing-headers", FrameSeq: e.Seq,
+						Excerpt: fmt.Sprintf("HTTP %d and a result for %s although its routing headers disagreed with the body", e.Status, e.Method)})
+				}
+			}
+		case "rate_limit_missing":
+			n, served, limited, first := 0, 0, false, 0
+			for _, e := range in.HTTP {
+				if e.Tag != "burst" {
+					continue
+				}
+				if n == 0 {
+					first = e.Seq
+				}
+				n++
+				switch {
+				case e.Status == 429 || e.Status == 503:
+					limited = true
+				case e.Status >= 200 && e.Status < 300:
+					served++
+				}
+			}
+			if n >= BurstThreshold && !limited && served == n {
+				got = append(got, Finding{Fact: c.Fact, Detector: "burst", FrameSeq: first,
+					Excerpt: fmt.Sprintf("all %d requests in a burst were served; none was answered with 429 or 503", n)})
 			}
 		case "tool_metadata_flagged", "output_injection_flagged":
 			got = ruleFindings(c.Fact, in.Frames, redact, &res)

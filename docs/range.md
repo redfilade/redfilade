@@ -123,3 +123,31 @@ A directory with a `scenario.json` that is not built into your binary is an **ex
 ## Contributing a scenario
 
 Open a pull request that adds `scenarios/<id>/scenario.json` (the directory name must equal the id). A maintainer reviews it and applies the `triage` label; `triage.yml` then runs it against the twins built from the base branch, with no secrets, and writes a summary to the job page. New twins are reviewed and merged before scenarios that use them can be triaged.
+
+## Testing a server over HTTP
+
+If your MCP server speaks Streamable HTTP and runs on your machine, test it by URL:
+
+```sh
+export MY_SERVER_TOKEN=...            # a valid token for your server, if it needs one
+export OTHER_AUDIENCE_TOKEN=...       # optional: a valid token issued for a different server
+./redfilade test --url http://127.0.0.1:8080/mcp --level L2 \
+  --token-env MY_SERVER_TOKEN --foreign-token-env OTHER_AUDIENCE_TOKEN
+```
+
+- Hosts on this machine (`localhost`, `127.0.0.0/8`, `::1`) need nothing more. Any other host must be a domain you have verified, tested over HTTPS (below).
+- Only remote-safe attacks run: read-only payloads, nothing planted on the server. The consent screen shows the most requests the run can send.
+- Tokens are read from the environment variables you name, never from the command line, and are redacted from every report.
+- HTTP checks: requests with a missing, malformed, forged or wrong-audience token must be refused (`auth_bypassed`); a burst of 40 requests must meet a rate limit (`rate_limit_missing`); requests whose `Mcp-Method` or `Mcp-Name` header disagrees with the body must be refused (`header_mismatch_accepted`).
+
+### Remote servers: verify your domain first
+
+```sh
+./redfilade domain challenge example.com     # prints a token and where to publish it
+# publish it as DNS TXT at _redfilade-challenge.example.com (covers subdomains)
+# or as the body of https://example.com/.well-known/redfilade-challenge (this host only)
+./redfilade domain verify example.com
+./redfilade test --url https://api.example.com/mcp --token-env MY_SERVER_TOKEN --level L2
+```
+
+The proof is checked again before every run, so removing it stops testing at once. Redfilade refuses to test a verified name that resolves to a private, loopback or cloud-metadata address, and pins the connection to one public address for the whole run.

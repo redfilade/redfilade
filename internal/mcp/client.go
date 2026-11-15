@@ -183,6 +183,18 @@ func readLine(br *bufio.Reader, limit int) ([]byte, error) {
 	return buf, nil
 }
 
+// deliver hands a response to a waiting call without recording it as a
+// frame: the transport uses it to fail a call whose HTTP request failed.
+func (c *Client) deliver(id json.RawMessage, m *message) {
+	c.pendingMu.Lock()
+	ch := c.pending[string(id)]
+	delete(c.pending, string(id))
+	c.pendingMu.Unlock()
+	if ch != nil {
+		ch <- m
+	}
+}
+
 func (c *Client) setReadErr(err error) {
 	c.readErrMu.Lock()
 	defer c.readErrMu.Unlock()

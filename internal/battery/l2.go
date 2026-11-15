@@ -305,6 +305,7 @@ var sqlPayloads = []string{
 func init() {
 	register(Attack{
 		ID:      "l2-sql-injection",
+		Remote:  true,
 		Level:   "L2",
 		Family:  "08",
 		Title:   "SQL injection changes the server's database queries",
