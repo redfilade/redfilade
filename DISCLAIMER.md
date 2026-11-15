@@ -2,7 +2,7 @@
 
 **Read this before you clone, build or run Redfilade.** By using any part of this repository you accept everything below. If you do not accept it, do not use Redfilade.
 
-This page explains the project's terms in plain language. The binding license is [`LICENSE`](LICENSE) (PolyForm Noncommercial 1.0.0). Where this page and the license differ, the license decides. This page adds conditions on how you use the software; it does not grant you any extra rights.
+This page explains the project's terms in plain language. The binding license is [`LICENSE`](LICENSE): your choice of PolyForm Noncommercial 1.0.0 or PolyForm Internal Use 1.0.0. Where this page and the license differ, the license decides. This page adds conditions on how you use the software; it does not grant you any extra rights.
 
 ## 1. What Redfilade is for
 
@@ -31,9 +31,10 @@ You must not use Redfilade, or anything you learn or build from it, to:
 
 If you are unsure whether something is allowed, **do not do it**.
 
-## 3. No commercial use
+## 3. Commercial use: internal testing only
 
-Redfilade is free for personal, educational, research and other **noncommercial** purposes, as defined in the license. **No commercial license is offered.** You may not sell Redfilade, include it in a paid product or service, or use it in work done for a company, unless that company is one of the noncommercial organisations the license names.
+- **Allowed:** anyone, including a commercial company, may use Redfilade inside their own organisation, for example to test their own MCP servers and clients or to run it in their own CI (PolyForm Internal Use 1.0.0). Learners and researchers may also change and share it noncommercially (PolyForm Noncommercial 1.0.0).
+- **Not allowed:** selling Redfilade or copies of it, offering it to others as a hosted or managed service, distributing it inside a product, or copying its code to build your own product. **No other license is offered.**
 
 ## 4. You alone are responsible
 

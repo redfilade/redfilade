@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-E5383B"></a>
+  <a href="LICENSE"><img alt="License: PolyForm Noncommercial or Internal Use" src="https://img.shields.io/badge/license-noncommercial%20%7C%20internal%20use-E5383B"></a>
   <img alt="Status: Phase 2" src="https://img.shields.io/badge/status-phase%202%20%C2%B7%20the%20range-10141C">
   <a href="DISCLAIMER.md"><img alt="Authorised use only" src="https://img.shields.io/badge/use-authorised%20targets%20only-10141C"></a>
   <a href="SECURITY.md"><img alt="Report a vulnerability privately" src="https://img.shields.io/badge/security-private%20reporting-10141C"></a>
@@ -45,10 +45,10 @@ An attack discovered in the Range becomes a test that anyone can run against an 
 |---|---|
 | A student or self-learner | See real MCP attacks succeed and fail, safely, and read exactly why |
 | A security researcher | Turn a new attack idea into a reproducible scenario with a vulnerable and a secure twin |
-| A builder of an MCP server or client, for noncommercial work | Run the same attacks against your own server before someone else does |
+| A company or developer building an MCP server or client | Run the same attacks against your own server, in your own CI, before someone else does. Free, including for commercial companies, as long as it stays internal |
 | A teacher or university | Run hands-on MCP security labs without exposing anything real |
 
-Commercial use is not licensed. See [License and terms](#license-and-terms).
+Selling Redfilade, hosting it for others or building it into a product is not allowed. See [License and terms](#license-and-terms).
 
 ## Verify before you run
 
@@ -164,7 +164,14 @@ New attack ideas are especially welcome. Start with [`CONTRIBUTING.md`](CONTRIBU
 
 ## License and terms
 
-Redfilade is **source-available** under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to use, study, change and share for learning, research and other noncommercial purposes, worldwide. **No commercial license is offered.** Because it restricts commercial use, it is not an "open source" license in the Open Source Initiative's sense.
+Redfilade is **source-available** and free. You choose one of two licenses ([`LICENSE`](LICENSE)):
+
+| You want to | License to use | Allowed |
+|---|---|---|
+| Learn, teach, research, write about attacks, share your own scenarios | [PolyForm Noncommercial 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0) | Use, change and share, for noncommercial purposes |
+| Test your own company's MCP servers and clients, including in CI | [PolyForm Internal Use 1.0.0](https://polyformproject.org/licenses/internal-use/1.0.0) | Use and change inside your organisation, including commercial companies; no distribution |
+
+**Not allowed under either license:** selling Redfilade, offering it to others as a hosted or managed service, or building it into a product you distribute. No other license is offered. Because of these limits, Redfilade is not "open source" in the Open Source Initiative's sense.
 
 - **Use:** only as allowed by [`DISCLAIMER.md`](DISCLAIMER.md), and only against systems you own or are authorised to test.
 - **Responsibility:** yours alone. The software comes as is, with no warranty, and the licensor, maintainers and contributors accept no liability for any use or misuse.

@@ -1,37 +1,48 @@
-# ADR-0017: Source-available, noncommercial license
+# ADR-0017: Source-available license: noncommercial or internal use
 
 - **Status:** Accepted
 - **Date:** 2026-11-15
 
 ## Context
 
-Redfilade publishes vulnerable targets and attack code for learning and research. The maintainer wants it free for anyone to learn from, but not sold or used commercially, and wants it clear that people who misuse it are responsible for what they do. The project was first published under the Apache License 2.0.
+Redfilade publishes vulnerable targets and attack code for learning and research. The maintainer wants:
+
+- anyone, including commercial companies, to be able to test **their own** MCP servers and clients with it;
+- nobody to copy the code to sell it, host it for others, or build their own product on it;
+- it to be clear that people who misuse it are responsible for what they do.
+
+The project was first published under the Apache License 2.0, which allows all of the above, including resale.
 
 ## Decision
 
-- License the code under the **PolyForm Noncommercial License 1.0.0**, with the licensor named in the Required Notice. No commercial license is offered.
-- Describe the project as **source-available**, not "open source", because the Open Source Definition forbids restrictions on commercial use.
-- Put use conditions in **`DISCLAIMER.md`**: authorised targets only, sole responsibility of the user, no warranty, verify before running. Keep the name and logo out of the license (**`TRADEMARKS.md`**).
-- Contributors license their work to everyone under the project license and to the licensor under Apache-2.0, so the project can still be maintained and relicensed later (`CONTRIBUTING.md`).
+- Offer the code under a **choice of two standard licenses**: PolyForm Noncommercial 1.0.0 (learning, research, sharing noncommercially) **or** PolyForm Internal Use 1.0.0 (any organisation, including companies, using and changing it internally, with no distribution). SPDX: `PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0`. The licensor is named in the Required Notice. No other license is offered.
+- Describe the project as **source-available**, not "open source".
+- Put use conditions in **`DISCLAIMER.md`**: authorised targets only, sole responsibility of the user, no warranty, verify before running. Keep the name and logo out of the licenses (**`TRADEMARKS.md`**).
+- Contributors license their work to everyone under the project licenses and to the licensor under Apache-2.0, so the project can still be maintained and relicensed (`CONTRIBUTING.md`).
 
 ## Consequences
 
-- ✅ Free for students, researchers, hobbyists and noncommercial organisations worldwide.
-- ✅ Selling Redfilade or using it in paid products is not licensed.
-- ✅ The license's own "No Liability" clause and the disclaimer state plainly that users are responsible for their use.
-- ⚠️ Companies may not use Redfilade, including the GitHub Action in their own CI, so fewer MCP builders can adopt it.
-- ⚠️ Some communities, package registries and programmes only accept OSI-approved licenses.
+- ✅ Students, researchers and teachers can use, change and share it.
+- ✅ Companies can run it on their own systems and in their own CI to test their own MCP servers, free.
+- ✅ Neither license allows selling it, hosting it for others, or distributing it in a product.
+- ✅ Both licenses carry the same "No Liability" clause, and the disclaimer states that users are responsible for their use.
+- ⚠️ Companies cannot share their changes publicly (Internal Use forbids distribution); they can contribute them upstream instead.
+- ⚠️ Edge cases, such as a consultant running it for a client, are not spelled out by either license; the maintainer answers them case by case.
+- ⚠️ Some communities and registries accept only OSI-approved licenses.
 - ⚠️ Copies published before this change stay available under Apache-2.0; that cannot be revoked.
-- ⚠️ No license removes liability the law itself imposes. The terms should be reviewed by a lawyer before a public launch.
+- ⚠️ No license removes liability the law itself imposes. These terms should be reviewed by a lawyer before a public launch.
 
 ## Alternatives considered
 
-| Option | Why not |
-|---|---|
-| Keep Apache-2.0 plus a disclaimer | Allows commercial use and resale, which the maintainer does not want |
-| Apache-2.0 with added use restrictions in the license text | Non-standard, legally unclear, and no longer open source anyway |
-| Business Source License | Converts to open source after a delay and is built for commercial vendors; not the goal here |
+| Option | Who uses it | Why not |
+|---|---|---|
+| Apache-2.0 plus a disclaimer | Cisco's MCP Scanner | Allows anyone to copy, sell and build products on the code |
+| PolyForm Noncommercial only | Many research projects | Blocks companies from testing their own servers, which is the builder use case |
+| PolyForm Shield | WebPageTest | Only bans products that compete with us; non-competing products could still be built on our code |
+| Elastic License 2.0 | Elasticsearch, Airbyte | Allows building and redistributing products; only bans managed services |
+| Functional Source License | Sentry | Bans competing use, but turns into Apache or MIT after two years |
+| Internal business use only, single license | Semgrep's rules | Closest in spirit, but alone it would stop learners sharing their changes; pairing it with Noncommercial covers both |
 
 ## Revisit when
 
-A commercial offering, a company-friendly tier, or an external contributor community makes the noncommercial restriction a blocker.
+A paid offering, a demand for redistribution by companies, or an external contributor community makes these limits a blocker.

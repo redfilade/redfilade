@@ -2,7 +2,7 @@
   "name": "redfilade-workspace",
   "private": true,
   "description": "Redfilade, the open MCP red-team range: JavaScript and TypeScript workspace root.",
-  "license": "PolyForm-Noncommercial-1.0.0",
+  "license": "PolyForm-Noncommercial-1.0.0 OR LicenseRef-PolyForm-Internal-Use-1.0.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/redfilade/redfilade.git"
