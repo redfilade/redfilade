@@ -1,13 +1,9 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/redfilade-lockup-dark.svg">
-    <img alt="Redfilade" src="assets/brand/redfilade-lockup-light.svg" width="440">
-  </picture>
+  <img alt="Redfilade: the open MCP red-team range" src="assets/brand/redfilade-banner-1600x520.png" width="100%">
 </p>
 
 <p align="center">
-  <strong>The open MCP red-team range.</strong><br>
-  Break it here, so nobody breaks it out there.
+  <strong>Break it here, so nobody breaks it out there.</strong>
 </p>
 
 <p align="center">
@@ -110,7 +106,7 @@ Every report states which level ran, the verdict per scenario, **what could not 
 
 ```text
 .github/            CI (untrusted lane), release (trusted lane), CODEOWNERS, ruleset
-assets/brand/       Logo, avatar and social preview, plus the script that builds them
+assets/brand/       Mascot artwork, banner, avatar and flat vector logo, plus their build scripts
 cmd/redfilade/      CLI (Go)
 internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery
 scenarios/          Range scenarios: data-only manifests (ADR-0013)
