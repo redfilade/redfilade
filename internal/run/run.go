@@ -17,6 +17,7 @@ import (
 
 	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
+	"github.com/redfilade/redfilade/internal/hostile"
 	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/report"
@@ -453,4 +454,99 @@ func Agent(ctx context.Context, m *scenario.Manifest, build string, model agent.
 	}
 	out.Agent = res
 	return out, nil
+}
+
+// Client runs an L4 scenario: the cell runs the client under test, and
+// Redfilade's hostile server talks to it over the cell's stdio.
+func Client(ctx context.Context, m *scenario.Manifest, build string, o Options) (*report.Evidence, error) {
+	if m.Kind != "client" || m.Hostile == nil {
+		return nil, fmt.Errorf("%s is not a client scenario", m.ID)
+	}
+	b := m.Builds.Secure
+	if build == "vulnerable" {
+		b = m.Builds.Vulnerable
+	} else if build != "secure" {
+		return nil, fmt.Errorf("unknown build %q", build)
+	}
+	w, err := world.Build(m)
+	if err != nil {
+		return nil, err
+	}
+	defer w.Close()
+	ctx, cancel := context.WithTimeout(ctx, o.deadline())
+	defer cancel()
+	ev := &report.Evidence{
+		Schema:    report.SchemaEvidence,
+		RunID:     NewRunID(),
+		Tool:      report.Tool{Name: "redfilade", Version: o.Version, Commit: o.Commit},
+		Subject:   report.Subject{Mode: "range", ScenarioID: m.ID, Build: build, Image: b.Image, Protocol: m.Protocol, Level: m.Level, Family: m.Family},
+		Isolation: string(o.Tier),
+		StartedAt: time.Now().UTC(),
+		Signature: report.Unsigned,
+	}
+	cell, err := o.Runner.Start(ctx, sandbox.Spec{Name: "redfilade-" + ev.RunID, Image: b.Image, Cmd: b.Cmd, WorldDir: w.Dir,
+		Network: "none", Env: w.Env, Tier: o.Tier, Pull: "never"})
+	if err != nil {
+		return nil, fmt.Errorf("start cell: %w", err)
+	}
+	rec := mcp.NewRecorder(mcp.DefaultMaxMessageBytes)
+	serr := hostile.Serve(ctx, cell.Stdout, cell.Stdin, hostile.Options{Probes: m.Hostile.Probes, Recorder: rec, Idle: 15 * time.Second})
+	cell.Stop()
+	frames := rec.Frames()
+	completed := serr == nil && len(frames) > 0
+	if serr != nil {
+		ev.Errors = append(ev.Errors, "hostile server: "+serr.Error())
+	}
+	if len(frames) == 0 {
+		ev.Errors = append(ev.Errors, "the client never connected")
+		if s := cell.Stderr(); s != "" {
+			ev.Errors = append(ev.Errors, "cell stderr: "+w.Redact(report.Clean(s, 800)))
+		}
+	}
+	ev.Oracle = oracle.Evaluate(oracle.Input{Frames: frames, Canaries: w.Canaries, Checks: m.Oracle.Checks, Match: m.Oracle.Match, Completed: completed, Network: "none"})
+	ev.Oracle.NotObserved = []string{
+		"what the client showed its user: Redfilade sees only what the client sends back over MCP",
+		"whether a human approved a request: an answer is judged by what it contains",
+	}
+	ev.WorldChanges = []world.Change{}
+	ev.Frames = report.RedactFrames(frames, w.Canaries)
+	for i := range ev.Errors {
+		ev.Errors[i] = w.Redact(ev.Errors[i])
+	}
+	ev.FinishedAt = time.Now().UTC()
+	return ev, nil
+}
+
+// ClientReport judges a session log written by `redfilade hostile-server`
+// against a user's own client.
+func ClientReport(frames []mcp.Frame, probes []string, version string) *report.Evidence {
+	var checks []scenario.Check
+	for _, p := range probes {
+		switch p {
+		case hostile.ProbeHidden:
+			checks = append(checks, scenario.Check{Fact: "client_followed_hidden_instruction"})
+		case hostile.ProbeElicitation:
+			checks = append(checks, scenario.Check{Fact: "client_answered_elicitation"})
+		case hostile.ProbeSampling:
+			checks = append(checks, scenario.Check{Fact: "client_answered_sampling"})
+		}
+	}
+	ev := &report.Evidence{
+		Schema:    report.SchemaEvidence,
+		RunID:     NewRunID(),
+		Tool:      report.Tool{Name: "redfilade", Version: version},
+		Subject:   report.Subject{Mode: "client-test", Protocol: mcp.Protocol2025, Level: "L4", Family: "19"},
+		Isolation: "your own client, connected to Redfilade's hostile server",
+		StartedAt: time.Now().UTC(),
+		Signature: report.Unsigned,
+	}
+	ev.Oracle = oracle.Evaluate(oracle.Input{Frames: frames, Checks: checks, Match: "any", Completed: len(frames) > 0, Network: "none"})
+	ev.Oracle.NotObserved = []string{
+		"what the client showed its user: Redfilade sees only what the client sends back over MCP",
+		"whether a human approved a request: an answer is judged by what it contains",
+	}
+	ev.WorldChanges = []world.Change{}
+	ev.Frames = frames
+	ev.FinishedAt = time.Now().UTC()
+	return ev
 }

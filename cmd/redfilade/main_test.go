@@ -113,7 +113,7 @@ func buildTwins(t *testing.T) string {
 
 var canaryRe = regexp.MustCompile(`CANARY_[A-Z0-9_]+_[A-Z2-7]{26}`)
 
-var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning", "command-injection", "sql-injection", "inbox-injection"}
+var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning", "command-injection", "sql-injection", "inbox-injection", "mcp-client"}
 
 func allScenarioDirs(t *testing.T) []string {
 	m, err := filepath.Glob("../../scenarios/*/scenario.json")
@@ -139,7 +139,7 @@ func TestRangeGateEndToEnd(t *testing.T) {
 	if code != exitPass {
 		t.Fatalf("gate exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	for _, id := range []string{"l1-leaky-errors", "l1-tool-poisoning", "l2-command-injection", "l2-path-traversal", "l2-sql-injection", "l2-ssrf", "l2-secrets-in-output", "l3-inbox-injection"} {
+	for _, id := range []string{"l1-leaky-errors", "l1-tool-poisoning", "l2-command-injection", "l2-path-traversal", "l2-sql-injection", "l2-ssrf", "l2-secrets-in-output", "l3-inbox-injection", "l4-hostile-server"} {
 		if !regexp.MustCompile(id+` \[vulnerable\]\s+exploited`).MatchString(stdout.String()) ||
 			!regexp.MustCompile(id+` \[secure\]\s+not_exploited`).MatchString(stdout.String()) {
 			t.Fatalf("unexpected summary for %s:\n%s", id, stdout.String())

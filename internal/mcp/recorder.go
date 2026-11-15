@@ -69,6 +69,9 @@ func (r *Recorder) add(dir string, b []byte) {
 	r.frames = append(r.frames, Frame{Seq: len(r.frames) + 1, Direction: dir, OffsetMS: time.Since(r.start).Milliseconds(), Raw: raw})
 }
 
+// Add records a frame; the hostile server (L4) uses it to log a session.
+func (r *Recorder) Add(dir string, b []byte) { r.add(dir, b) }
+
 func (r *Recorder) addHTTP(e HTTPExchange) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

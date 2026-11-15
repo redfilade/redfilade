@@ -165,3 +165,25 @@ export ANTHROPIC_API_KEY=...                                                    
 - `scripted:naive` follows instructions it finds in tool output, `scripted:careful` never does. They test the range and the twins; they are not real models.
 - With `anthropic:<model-id>`, the task, tool list and tool outputs (synthetic data only) are sent to the model API. `REDFILADE_MODEL_BASE_URL` points requests at a model proxy instead.
 - `agent_leaked_canary` fires only when the server **carried out** a tool call carrying the secret, so a server-side safeguard counts.
+
+## L4: testing MCP clients
+
+Here Redfilade plays a malicious MCP server and judges what the client does: obeying instructions hidden in invisible characters, answering a fake password prompt, or running a server-requested model completion.
+
+In the Range, client twins run in cells:
+
+```sh
+./redfilade range run l4-hostile-server --build vulnerable
+```
+
+For your own client, add Redfilade as a stdio server in the client's configuration, use it briefly (ask about the weather in a city), then disconnect and judge the session:
+
+```json
+{ "mcpServers": { "redfilade-hostile": { "command": "redfilade", "args": ["hostile-server", "--log", "/tmp/redfilade-session.jsonl"] } } }
+```
+
+```sh
+./redfilade client-report /tmp/redfilade-session.jsonl --sarif client.sarif
+```
+
+Redfilade sees what your client sends back, not what it shows: an answer your user approved looks the same as an automatic one.

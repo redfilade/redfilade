@@ -6,6 +6,8 @@
 //	redfilade pack digest DIR | pack verify DIR
 //	redfilade triage summarize DIR
 //	redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list
+//	redfilade hostile-server [--probes all] [--log FILE]   (stdio; for your own MCP client)
+//	redfilade client-report FILE [--sarif FILE]
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
@@ -18,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -36,6 +39,8 @@ import (
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
 	"github.com/redfilade/redfilade/internal/domain"
+	"github.com/redfilade/redfilade/internal/hostile"
+	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/pack"
 	"github.com/redfilade/redfilade/internal/report"
@@ -86,6 +91,10 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		return exitError
 	case "domain":
 		return cmdDomain(ctx, args[1:], stdout, stderr)
+	case "hostile-server":
+		return cmdHostileServer(ctx, args[1:], stdin, stdout, stderr)
+	case "client-report":
+		return cmdClientReport(args[1:], stdout, stderr)
 	case "triage":
 		if len(args) == 3 && args[1] == "summarize" {
 			rows, skipped, err := triage.Load(args[2])
@@ -134,6 +143,8 @@ Usage:
   redfilade domain challenge DOMAIN
   redfilade domain verify DOMAIN
   redfilade domain list
+  redfilade hostile-server [--probes all] [--log FILE]
+  redfilade client-report FILE [--sarif FILE] [--out DIR]
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
@@ -791,6 +802,9 @@ func scenarioPlan(m *scenario.Manifest, build string, tier sandbox.Tier, t *targ
 
 // runScenario runs one build, through the agent engine for L3 scenarios.
 func runScenario(ctx context.Context, m *scenario.Manifest, build string, o run.Options, c common) (*report.Evidence, error) {
+	if m.Kind == "client" {
+		return run.Client(ctx, m, build, o)
+	}
 	if m.Kind != "agent" {
 		return run.Scenario(ctx, m, build, o)
 	}
@@ -802,4 +816,94 @@ func runScenario(ctx context.Context, m *scenario.Manifest, build string, o run.
 		return nil, err
 	}
 	return run.Agent(ctx, m, build, model, c.trials, o)
+}
+
+// cmdHostileServer runs Redfilade's hostile MCP server on stdin and stdout,
+// for testing your own MCP client: add it to the client as a stdio server.
+// Nothing but protocol messages is written to stdout; the session is saved
+// to the log file when the client disconnects.
+func cmdHostileServer(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hostile-server", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	probes := fs.String("probes", "all", "comma-separated: elicitation, hidden_instruction, sampling, or all")
+	logFile := fs.String("log", "redfilade-hostile-session.jsonl", "where to save the session for client-report")
+	idle := fs.Duration("idle", 10*time.Minute, "end the session after this long without messages")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	list, err := hostile.SortedProbes(strings.Split(*probes, ","))
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	rec := mcp.NewRecorder(mcp.DefaultMaxMessageBytes)
+	fmt.Fprintf(stderr, "redfilade hostile server: probes %s; session log %s\n", strings.Join(list, ", "), *logFile)
+	serr := hostile.Serve(ctx, stdin, stdout, hostile.Options{Probes: list, Recorder: rec, Idle: *idle})
+	session := map[string]any{"schema": "redfilade.hostile-session/v1", "probes": list, "frames": rec.Frames()}
+	if _, err := writeFile(filepath.Dir(*logFile), filepath.Base(*logFile), func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", " ")
+		return enc.Encode(session)
+	}); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if serr != nil {
+		fmt.Fprintln(stderr, "redfilade:", serr)
+		return exitError
+	}
+	return exitPass
+}
+
+// cmdClientReport judges a hostile-server session log.
+func cmdClientReport(args []string, stdout, stderr io.Writer) int {
+	file, rest := splitPositional(args)
+	fs := flag.NewFlagSet("client-report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	sarif := fs.String("sarif", "", "write SARIF 2.1.0 to this file")
+	out := fs.String("out", "redfilade-results", "directory for the evidence file")
+	if err := fs.Parse(rest); err != nil || file == "" {
+		fmt.Fprintln(stderr, "usage: redfilade client-report FILE [--sarif FILE] [--out DIR]")
+		return exitError
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	var session struct {
+		Schema string      `json:"schema"`
+		Probes []string    `json:"probes"`
+		Frames []mcp.Frame `json:"frames"`
+	}
+	if err := json.Unmarshal(b, &session); err != nil || session.Schema != "redfilade.hostile-session/v1" {
+		fmt.Fprintln(stderr, "redfilade: not a hostile-server session log")
+		return exitError
+	}
+	probes, err := hostile.SortedProbes(session.Probes)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	ev := run.ClientReport(session.Frames, probes, version.Version)
+	summary(stdout, "your client [L4]", ev)
+	if _, err := writeFile(*out, "evidence-client-L4.json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if *sarif != "" {
+		if _, err := writeFile(filepath.Dir(*sarif), filepath.Base(*sarif), func(w io.Writer) error {
+			return report.WriteSARIF(w, ev, version.Version, "README.md")
+		}); err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+	}
+	switch ev.Oracle.Verdict {
+	case oracle.Exploited:
+		return exitFindings
+	case oracle.NotExploited:
+		return exitPass
+	}
+	return exitError
 }

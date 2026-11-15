@@ -95,6 +95,7 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
 | `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
 | `l2-command-injection` | L2 | A ping tool that pastes input into a shell command, so `;` and `$(...)` read a deploy key |
+| `l4-hostile-server` | L4 | A malicious server hides instructions in invisible text, phishes for a password and abuses sampling against a client |
 | `l3-inbox-injection` | L3 | An email asks the AI assistant to forward the inbox, including a reset code, to an outside address |
 | `l2-sql-injection` | L2 | A customer lookup that pastes input into SQL, so a quote and `UNION` read an API key from another table |
 
@@ -146,7 +147,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 | **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
 | **L2** Security battery | Path traversal, SSRF, secrets in output, command injection, SQL injection, and over HTTP: token audience, rate limits, routing-header mismatch | Eight attacks available |
 | **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | First scenario available: success rate with a 95% interval |
-| **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
+| **L4** Client and host | A client facing a hostile server: hidden text, password phishing, sampling abuse | Available: Range twins and your own client |
 | **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Planned |
 
 ## Roadmap
@@ -155,7 +156,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 - [ ] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. Built; the signed proof runs with the first release dry run. [`docs/phase-1.md`](docs/phase-1.md)
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. [`docs/phase-2.md`](docs/phase-2.md)
 - [x] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and the hosted service for remote tests ([`docs/bench.md`](docs/bench.md)). OAuth sign-in and hosted Range cells follow. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
-- [ ] **Phase 4: Clients and defences.** L4 hostile servers that test MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set.
+- [ ] **Phase 4: Clients and defences.** L4 hostile server for testing MCP clients and hosts (done), and L5 measurement of gateways and guardrails against every scenario and a benign task set. Tracked in [`docs/phase-4.md`](docs/phase-4.md).
 
 ## Repository layout
 
@@ -170,7 +171,7 @@ scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0022
+docs/adr/           Architecture Decision Records 0001 to 0023
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```
