@@ -16,6 +16,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/redfilade/redfilade/internal/defence"
 	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/world"
@@ -37,7 +38,8 @@ type Evidence struct {
 	WorldChanges []world.Change     `json:"world_changes"`
 	Egress       []oracle.Egress    `json:"egress,omitempty"`
 	HTTP         []mcp.HTTPExchange `json:"http,omitempty"`
-	Agent        *AgentResult       `json:"agent,omitempty"` // L3 runs
+	Agent        *AgentResult       `json:"agent,omitempty"`   // L3 runs
+	Defence      *defence.Summary   `json:"defence,omitempty"` // L5 runs
 	Frames       []mcp.Frame        `json:"frames"`
 	Errors       []string           `json:"errors,omitempty"`
 	Signature    Signature          `json:"signature"`

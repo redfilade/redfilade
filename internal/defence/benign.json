@@ -1,0 +1,10 @@
+[
+  { "scenario": "l1-leaky-errors",      "calls": [ { "tool": "lookup_customer", "arguments": { "id": "c-1001" } } ] },
+  { "scenario": "l1-tool-poisoning",    "calls": [ { "tool": "add", "arguments": { "a": 2, "b": 3 } } ] },
+  { "scenario": "l2-command-injection", "calls": [ { "tool": "ping_host", "arguments": { "host": "example.com" } } ] },
+  { "scenario": "l2-path-traversal",    "calls": [ { "tool": "read_doc", "arguments": { "name": "welcome.md" } } ] },
+  { "scenario": "l2-secrets-in-output", "calls": [ { "tool": "get_status", "arguments": {} } ] },
+  { "scenario": "l2-sql-injection",     "calls": [ { "tool": "find_customer", "arguments": { "name": "Asha Rao" } },
+                                                   { "tool": "find_customer", "arguments": { "name": "Siobhan O'Brien" } } ] },
+  { "scenario": "l2-ssrf",              "calls": [ { "tool": "fetch_preview", "arguments": { "url": "https://docs.example.com/guide" } } ] }
+]

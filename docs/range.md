@@ -187,3 +187,26 @@ For your own client, add Redfilade as a stdio server in the client's configurati
 ```
 
 Redfilade sees what your client sends back, not what it shows: an answer your user approved looks the same as an automatic one.
+
+## L5: measuring a defence
+
+A defence (gateway, firewall, guardrail) is a container image that speaks `redfilade.defence/v1` on stdin and stdout. For every MCP message Redfilade writes one line:
+
+```json
+{"direction":"client_to_server","message":{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read_doc","arguments":{"path":"../../etc/passwd"}}}}
+```
+
+and the defence answers one line:
+
+```json
+{"action":"block","reason":"path traversal"}
+```
+
+```sh
+./redfilade defend --defence-image my-gateway-adapter:latest --min-block-rate 0.8 --max-false-positive-rate 0.05
+```
+
+- Every attack and agent scenario runs against its vulnerable twin through the defence; benign tasks run against the secure twins.
+- It fails closed: no answer within 5 s, a crash or a malformed line is a block.
+- The defence runs in its own cell with no network. Results go to `defence-report.json`.
+- Range twin: `targets/defence-rules` (strict and permissive builds) shows what a pass and a fail look like.

@@ -7,6 +7,7 @@
 //	redfilade triage summarize DIR
 //	redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list
 //	redfilade hostile-server [--probes all] [--log FILE]   (stdio; for your own MCP client)
+//	redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
 //	redfilade client-report FILE [--sarif FILE]
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
@@ -38,6 +39,7 @@ import (
 	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
+	"github.com/redfilade/redfilade/internal/defence"
 	"github.com/redfilade/redfilade/internal/domain"
 	"github.com/redfilade/redfilade/internal/hostile"
 	"github.com/redfilade/redfilade/internal/mcp"
@@ -91,6 +93,8 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		return exitError
 	case "domain":
 		return cmdDomain(ctx, args[1:], stdout, stderr)
+	case "defend":
+		return cmdDefend(ctx, args[1:], stdin, stdout, stderr, runner)
 	case "hostile-server":
 		return cmdHostileServer(ctx, args[1:], stdin, stdout, stderr)
 	case "client-report":
@@ -144,6 +148,7 @@ Usage:
   redfilade domain verify DOMAIN
   redfilade domain list
   redfilade hostile-server [--probes all] [--log FILE]
+  redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
   redfilade client-report FILE [--sarif FILE] [--out DIR]
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
@@ -906,4 +911,188 @@ func cmdClientReport(args []string, stdout, stderr io.Writer) int {
 		return exitPass
 	}
 	return exitError
+}
+
+// defenceReport is the L5 result file.
+type defenceReport struct {
+	Schema       string           `json:"schema"`
+	Image        string           `json:"image"`
+	Isolation    string           `json:"isolation"`
+	Attacks      []defenceAttack  `json:"attacks"`
+	Benign       []defenceBenign  `json:"benign"`
+	Stopped      int              `json:"stopped"`
+	Judged       int              `json:"judged"` // attack runs that were not inconclusive
+	BlockRate    float64          `json:"block_rate"`
+	BlockCI95    [2]float64       `json:"block_rate_interval_95"`
+	BenignCalls  int              `json:"benign_calls"`
+	FalsePos     int              `json:"false_positives"`
+	FalsePosRate float64          `json:"false_positive_rate"`
+	FalsePosCI95 [2]float64       `json:"false_positive_rate_interval_95"`
+	Errors       []string         `json:"errors,omitempty"`
+	Started      time.Time        `json:"started_at"`
+	Finished     time.Time        `json:"finished_at"`
+	Defence      *defence.Summary `json:"-"`
+}
+
+type defenceAttack struct {
+	Scenario string          `json:"scenario"`
+	Level    string          `json:"level"`
+	Verdict  string          `json:"verdict"`
+	Stopped  bool            `json:"stopped"`
+	Blocked  []defence.Block `json:"blocked"`
+}
+
+type defenceBenign struct {
+	Scenario string          `json:"scenario"`
+	Calls    int             `json:"calls"`
+	Blocked  int             `json:"blocked"`
+	Details  []defence.Block `json:"details"`
+}
+
+// cmdDefend measures a defence (L5): how many built-in attacks it stops on
+// vulnerable twins, and how many benign calls on secure twins it blocks.
+func cmdDefend(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, runner sandbox.Runner) int {
+	fs := flag.NewFlagSet("defend", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	addCommon(fs, &c)
+	image := fs.String("defence-image", "", "container image of the defence (speaks redfilade.defence/v1 on stdio)")
+	minBlock := fs.Float64("min-block-rate", -1, "fail (exit 1) if the block rate is lower than this, 0-1")
+	maxFP := fs.Float64("max-false-positive-rate", -1, "fail (exit 1) if the false-positive rate is higher than this, 0-1")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if *image == "" {
+		fmt.Fprintln(stderr, "usage: redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]")
+		return exitError
+	}
+	all, err := scenarios.Builtins()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	var attacks []*scenario.Manifest
+	for _, m := range all {
+		if m.Kind == "attack" || m.Kind == "agent" {
+			attacks = append(attacks, m)
+		}
+	}
+	tasks, err := defence.Benign()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	o, tier := opts(ctx, runner, c)
+	plan := consent.DefencePlan{Image: *image, Attacks: len(attacks), Benign: len(tasks), Tier: tier, Pull: "missing",
+		ModelNote: "agent scenarios use " + c.model}
+	if !approve(plan, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	empty, err := os.MkdirTemp("", "redfilade-defence-")
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	defer os.RemoveAll(empty)
+	cell, err := runner.Start(ctx, sandbox.Spec{Name: "redfilade-defence-" + run.NewRunID(), Image: *image, WorldDir: empty, Network: "none", Tier: tier, Pull: "missing"})
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade: start defence:", err)
+		return exitError
+	}
+	defer cell.Stop()
+	o.Defence = defence.NewProc(cell.Stdin, cell.Stdout)
+	o.DefenceImage = *image
+
+	rep := defenceReport{Schema: "redfilade.defence-report/v1", Image: *image, Isolation: string(tier), Started: time.Now().UTC(),
+		Attacks: []defenceAttack{}, Benign: []defenceBenign{}}
+	fmt.Fprintf(stdout, "\nAttacks through %s:\n", *image)
+	for _, m := range attacks {
+		ev, err := runScenario(ctx, m, "vulnerable", o, c)
+		if err != nil {
+			rep.Errors = append(rep.Errors, m.ID+": "+err.Error())
+			continue
+		}
+		a := defenceAttack{Scenario: m.ID, Level: m.Level, Verdict: ev.Oracle.Verdict, Blocked: []defence.Block{}}
+		if ev.Defence != nil {
+			a.Blocked = ev.Defence.Blocked
+		}
+		// A run the defence cut short (inconclusive, with messages blocked)
+		// counts as stopped: the attack never got to run. An inconclusive
+		// run with nothing blocked says nothing about the defence.
+		switch {
+		case ev.Oracle.Verdict == oracle.NotExploited,
+			ev.Oracle.Verdict == oracle.Inconclusive && len(a.Blocked) > 0:
+			a.Stopped = true
+			rep.Stopped++
+			rep.Judged++
+		case ev.Oracle.Verdict == oracle.Exploited:
+			rep.Judged++
+		}
+		state := "NOT stopped"
+		switch {
+		case a.Stopped:
+			state = "stopped"
+		case ev.Oracle.Verdict == oracle.Inconclusive:
+			state = "inconclusive"
+		}
+		fmt.Fprintf(stdout, "  %-24s %s  %-12s (%d messages blocked)\n", m.ID, m.Level, state, len(a.Blocked))
+		rep.Attacks = append(rep.Attacks, a)
+	}
+	fmt.Fprintln(stdout, "\nBenign tasks on secure twins:")
+	for _, t := range tasks {
+		base, ok := scenarios.Builtin(t.Scenario)
+		if !ok {
+			rep.Errors = append(rep.Errors, "benign task for unknown scenario "+t.Scenario)
+			continue
+		}
+		m := *base
+		m.Exploit = nil
+		for _, call := range t.Calls {
+			m.Exploit = append(m.Exploit, scenario.Step{Call: call.Tool, Arguments: call.Arguments})
+		}
+		ev, err := run.Scenario(ctx, &m, "secure", o)
+		if err != nil {
+			rep.Errors = append(rep.Errors, t.Scenario+" (benign): "+err.Error())
+			continue
+		}
+		b := defenceBenign{Scenario: t.Scenario, Calls: len(t.Calls), Details: []defence.Block{}}
+		if ev.Defence != nil {
+			b.Details = ev.Defence.Blocked
+			b.Blocked = min(len(ev.Defence.Blocked), len(t.Calls))
+		}
+		rep.BenignCalls += b.Calls
+		rep.FalsePos += b.Blocked
+		fmt.Fprintf(stdout, "  %-24s %d of %d calls blocked\n", t.Scenario, b.Blocked, b.Calls)
+		rep.Benign = append(rep.Benign, b)
+	}
+	if rep.Judged > 0 {
+		rep.BlockRate = float64(rep.Stopped) / float64(rep.Judged)
+	}
+	lo, hi := agent.Wilson(rep.Stopped, rep.Judged)
+	rep.BlockCI95 = [2]float64{lo, hi}
+	if rep.BenignCalls > 0 {
+		rep.FalsePosRate = float64(rep.FalsePos) / float64(rep.BenignCalls)
+	}
+	lo, hi = agent.Wilson(rep.FalsePos, rep.BenignCalls)
+	rep.FalsePosCI95 = [2]float64{lo, hi}
+	rep.Finished = time.Now().UTC()
+	fmt.Fprintf(stdout, "\nBlock rate      %d of %d attacks stopped (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+		rep.Stopped, rep.Judged, rep.BlockRate*100, rep.BlockCI95[0]*100, rep.BlockCI95[1]*100)
+	fmt.Fprintf(stdout, "False positives %d of %d benign calls blocked (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+		rep.FalsePos, rep.BenignCalls, rep.FalsePosRate*100, rep.FalsePosCI95[0]*100, rep.FalsePosCI95[1]*100)
+	for _, e := range rep.Errors {
+		fmt.Fprintln(stdout, "  note:", report.Clean(e, 300))
+	}
+	if _, err := writeFile(c.out, "defence-report.json", func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if (*minBlock >= 0 && rep.BlockRate < *minBlock) || (*maxFP >= 0 && rep.FalsePosRate > *maxFP) || rep.Judged == 0 {
+		return exitFindings
+	}
+	return exitPass
 }

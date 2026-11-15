@@ -198,3 +198,42 @@ func (p RemotePlan) Render() string {
 	b.WriteString("\nOnly test servers you own or are authorised to test (DISCLAIMER.md).\n")
 	return b.String()
 }
+
+// DefencePlan is what the user agrees to before L5 measures a defence.
+type DefencePlan struct {
+	Image     string
+	Attacks   int // scenarios run against vulnerable twins
+	Benign    int // benign tasks run against secure twins
+	Tier      sandbox.Tier
+	Pull      string
+	ModelNote string
+}
+
+// Check refuses a plan without isolation or an image.
+func (p DefencePlan) Check() error {
+	if p.Image == "" {
+		return fmt.Errorf("%w: no defence image", ErrRefused)
+	}
+	if p.Tier == sandbox.TierNone {
+		return fmt.Errorf("%w: no container runtime, so nothing can be isolated", ErrRefused)
+	}
+	return nil
+}
+
+// Render returns the consent screen for an L5 run.
+func (p DefencePlan) Render() string {
+	var b strings.Builder
+	line := func(k, v string) { fmt.Fprintf(&b, "  %-12s %s\n", k, v) }
+	b.WriteString("Redfilade is about to measure a defence (L5).\n\n")
+	line("Defence", p.Image+" (runs in its own cell: no network, read-only, all privileges dropped)")
+	line("Attacks", fmt.Sprintf("%d scenarios against their vulnerable twins, through the defence", p.Attacks))
+	line("Benign set", fmt.Sprintf("%d tasks against secure twins, to count false positives", p.Benign))
+	line("Isolation", string(p.Tier))
+	if p.Pull == "missing" {
+		line("Image pull", "the defence image may be pulled if it is not present locally")
+	}
+	if p.ModelNote != "" {
+		line("Agents", p.ModelNote)
+	}
+	return b.String()
+}

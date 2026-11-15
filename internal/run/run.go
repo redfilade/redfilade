@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
+	"github.com/redfilade/redfilade/internal/defence"
 	"github.com/redfilade/redfilade/internal/hostile"
 	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
@@ -34,6 +36,9 @@ type Options struct {
 	Version  string
 	Commit   string
 	Pull     string // image pull policy for builder images ("missing"); twins use "never"
+	// Defence, when set, sits between the client and the target (L5).
+	Defence      defence.Filter
+	DefenceImage string
 }
 
 func (o Options) deadline() time.Duration {
@@ -141,12 +146,12 @@ func Target(ctx context.Context, image string, cmd []string, protocol, level str
 type stepFunc func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env battery.Env) error
 
 func execute(ctx context.Context, o Options, w *world.World, subject report.Subject, cmd []string, network string,
-	checks []scenario.Check, match, pull string, steps stepFunc) (*report.Evidence, error) {
+	checks []scenario.Check, match, pull string, steps stepFunc) (ev *report.Evidence, err error) {
 
 	ctx, cancel := context.WithTimeout(ctx, o.deadline())
 	defer cancel()
 	runID := NewRunID()
-	ev := &report.Evidence{
+	ev = &report.Evidence{
 		Schema:    report.SchemaEvidence,
 		RunID:     runID,
 		Tool:      report.Tool{Name: "redfilade", Version: o.Version, Commit: o.Commit},
@@ -184,7 +189,24 @@ func execute(ctx context.Context, o Options, w *world.World, subject report.Subj
 	if subject.Protocol == mcp.Protocol2025 {
 		proto = mcp.Protocol2025
 	}
-	client := mcp.New(cell.Stdout, cell.Stdin, mcp.Options{Protocol: proto, ClientVersion: o.Version})
+	var fromTarget io.Reader = cell.Stdout
+	var toTarget io.Writer = cell.Stdin
+	var dstats *defence.Stats
+	if o.Defence != nil {
+		fromTarget, toTarget, dstats = defence.Wrap(o.Defence, cell.Stdout, cell.Stdin)
+	}
+	client := mcp.New(fromTarget, toTarget, mcp.Options{Protocol: proto, ClientVersion: o.Version})
+	defer func() {
+		if dstats != nil && ev != nil {
+			sum := dstats.Snapshot()
+			sum.Image = o.DefenceImage
+			for i := range sum.Blocked {
+				sum.Blocked[i].Reason = report.Clean(sum.Blocked[i].Reason, 200)
+				sum.Blocked[i].Tool = report.Clean(sum.Blocked[i].Tool, 100)
+			}
+			ev.Defence = &sum
+		}
+	}()
 
 	completed := false
 	func() {

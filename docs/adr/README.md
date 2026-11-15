@@ -29,3 +29,4 @@ To propose a change, copy [`template.md`](template.md) to the next number and op
 | [0021](0021-l3-agent-in-the-loop.md) | L3 agent-in-the-loop scenarios | Accepted |
 | [0022](0022-hosted-test-bench-mvp.md) | Hosted Test Bench, first version | Accepted |
 | [0023](0023-l4-hostile-server-client-testing.md) | L4: testing MCP clients with a hostile server | Accepted |
+| [0024](0024-l5-defence-measurement.md) | L5: measuring defences | Accepted |

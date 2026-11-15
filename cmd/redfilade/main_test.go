@@ -113,7 +113,7 @@ func buildTwins(t *testing.T) string {
 
 var canaryRe = regexp.MustCompile(`CANARY_[A-Z0-9_]+_[A-Z2-7]{26}`)
 
-var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning", "command-injection", "sql-injection", "inbox-injection", "mcp-client"}
+var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning", "command-injection", "sql-injection", "inbox-injection", "mcp-client", "defence-rules"}
 
 func allScenarioDirs(t *testing.T) []string {
 	m, err := filepath.Glob("../../scenarios/*/scenario.json")

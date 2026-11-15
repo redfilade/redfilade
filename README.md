@@ -83,6 +83,14 @@ Or, for a Streamable HTTP server on your machine, or on a domain you have verifi
 ./redfilade test --url https://api.example.com/mcp --token-env MY_SERVER_TOKEN --level L2
 ```
 
+Test your **MCP client** against a hostile server, or score a **defence** (gateway or guardrail) on attacks stopped versus normal work broken:
+
+```sh
+./redfilade hostile-server --log /tmp/session.jsonl      # add to your client's MCP config, use it, then:
+./redfilade client-report /tmp/session.jsonl
+./redfilade defend --defence-image my-gateway-adapter:dev --min-block-rate 0.8 --max-false-positive-rate 0.05
+```
+
 Full guide: [`docs/range.md`](docs/range.md).
 
 ## Scenarios today
@@ -148,7 +156,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 | **L2** Security battery | Path traversal, SSRF, secrets in output, command injection, SQL injection, and over HTTP: token audience, rate limits, routing-header mismatch | Eight attacks available |
 | **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | First scenario available: success rate with a 95% interval |
 | **L4** Client and host | A client facing a hostile server: hidden text, password phishing, sampling abuse | Available: Range twins and your own client |
-| **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Planned |
+| **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Available: block rate and false-positive rate with 95% intervals |
 
 ## Roadmap
 
@@ -156,7 +164,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 - [ ] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. Built; the signed proof runs with the first release dry run. [`docs/phase-1.md`](docs/phase-1.md)
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. [`docs/phase-2.md`](docs/phase-2.md)
 - [x] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and the hosted service for remote tests ([`docs/bench.md`](docs/bench.md)). OAuth sign-in and hosted Range cells follow. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
-- [ ] **Phase 4: Clients and defences.** L4 hostile server for testing MCP clients and hosts (done), and L5 measurement of gateways and guardrails against every scenario and a benign task set. Tracked in [`docs/phase-4.md`](docs/phase-4.md).
+- [x] **Phase 4: Clients and defences.** L4 hostile server for testing MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set. Tracked in [`docs/phase-4.md`](docs/phase-4.md).
 
 ## Repository layout
 
@@ -171,7 +179,7 @@ scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0023
+docs/adr/           Architecture Decision Records 0001 to 0024
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```
