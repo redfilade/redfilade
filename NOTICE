@@ -10,5 +10,11 @@ licensed (see TRADEMARKS.md).
 Versions published before 2026-11-15 were released under the Apache
 License 2.0 and remain available under it.
 
+This product includes detection rules and test fixtures from Cisco MCP
+Scanner (https://github.com/cisco-ai-defense/mcp-scanner),
+Copyright 2025 Cisco Systems, Inc. and its affiliates, licensed under the
+Apache License 2.0. They are in internal/rules/cisco/ and stay under that
+license.
+
 The Redfilade wordmark is set in Inter Display, licensed under the
 SIL Open Font License 1.1 (https://openfontlicense.org).

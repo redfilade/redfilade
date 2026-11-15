@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/redfilade-lockup-dark.svg">
-    <img alt="Redfilade" src="assets/brand/redfilade-lockup-light.svg" width="440">
-  </picture>
+  <img alt="Redfilade: the MCP red-team range. A small hooded robot mascot with glowing red eyes beside the Redfilade wordmark." src="assets/brand/redfilade-banner.png" width="100%">
 </p>
 
 <p align="center">
@@ -89,8 +86,25 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-path-traversal` | L2 | A file tool tricked into reading outside its folder |
 | `l2-ssrf` | L2 | A "fetch a preview" tool tricked into calling a server it should not reach |
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
+| `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
+
+## Where Cisco comes in
+
+Redfilade reuses one part of [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner): its **detection rules**. Nothing else.
+
+| | |
+|---|---|
+| **What we use** | Cisco's 10 detection rules for malicious MCP text: tool poisoning, prompt injection, coercive injection, credential harvesting, data exfiltration, command, code, script and SQL injection, and system manipulation. Copied unmodified into [`internal/rules/cisco/`](internal/rules/cisco/) |
+| **What they power** | The `tool_metadata_flagged` check (tool descriptions and parameters), the `output_injection_flagged` check (tool output), the L1 `l1-tool-poisoning` battery check and the `l1-tool-poisoning` practice scenario |
+| **How they run** | Inside Redfilade's own Go engine ([`internal/rules`](internal/rules/)), tested to give exactly the same results as the official YARA engine on Cisco's test cases. Cisco's code never runs |
+| **What you need** | **Nothing extra.** The rules are built into the `redfilade` binary. No Cisco account, API key, Python, YARA or internet connection is needed, and nothing is sent to Cisco |
+| **What we do not use** | Cisco's scanner program, its cloud, AI-model and VirusTotal analysers, and its example malicious servers |
+| **License** | The rules stay under the Apache License 2.0 with Cisco's copyright ([`LICENSE`](internal/rules/cisco/LICENSE), [`SOURCE.md`](internal/rules/cisco/SOURCE.md)). Cisco does not endorse Redfilade |
+| **Updates** | Maintainers only: copy the new rules, refresh the checksums, regenerate the test corpus with [`scripts/cisco-rules-golden.py`](scripts/cisco-rules-golden.py) (needs `yara-python`), and review every change. See [ADR-0018](docs/adr/0018-reuse-cisco-mcp-scanner-rules.md) |
+
+A rule match is a strong warning sign, not proof of intent: every report names the rule that fired and shows the matching text.
 
 ## Rules of engagement
 
@@ -119,7 +133,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 
 | Level | Checks | Status |
 |---|---|---|
-| **L1** Conformance and hygiene | Leaky errors, then protocol correctness, schemas, auth, oversized inputs | First attack available |
+| **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
 | **L2** Security battery | Path traversal, SSRF, secrets in output, then injection, token audience, rate limits | Three attacks available |
 | **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | Planned |
 | **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
@@ -136,15 +150,15 @@ Today a cell is a hardened container: no network or a private trap network, read
 
 ```text
 .github/            CI (untrusted lane), release (trusted lane), triage lane, CODEOWNERS, rulesets
-assets/brand/       Logo, mascot and social preview
+assets/brand/       Banner, logo, mascot and social preview
 cmd/redfilade/      CLI (Go)
-internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery, packs, triage
+internal/           MCP client, scenarios, world, sandbox, consent, oracle, detection rules, reports, battery, packs, triage
 infra/sink/         Egress trap: records requests from cells, never forwards them
 scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0017
+docs/adr/           Architecture Decision Records 0001 to 0018
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```
@@ -178,3 +192,5 @@ Redfilade is **source-available** and free. You choose one of two licenses ([`LI
 - **Name and logo:** not licensed. See [`TRADEMARKS.md`](TRADEMARKS.md).
 
 Versions published before this change remain under the Apache License 2.0 they were released with.
+
+**Third-party code.** The detection rules in `internal/rules/cisco/` come from Cisco's MCP Scanner and remain under the Apache License 2.0. See [Where Cisco comes in](#where-cisco-comes-in).

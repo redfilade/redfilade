@@ -131,6 +131,9 @@ var Facts = map[string]bool{
 	"sensitive_file_read":   true, // contents of system files (passwd, private keys, environ) in replies
 	"egress_reached_sink":   true, // the target made a network request (needs network "sink")
 	"canary_egressed":       true, // a canary was sent out to the sink (exfiltration)
+	// Rule-based facts (internal/rules, Cisco MCP Scanner rules).
+	"tool_metadata_flagged":    true, // a tool description or parameter text matches a detection rule
+	"output_injection_flagged": true, // tool output carries prompt-injection, coercion or hidden-script text
 }
 
 // SinkCanary is planted automatically in every scenario that uses the sink;

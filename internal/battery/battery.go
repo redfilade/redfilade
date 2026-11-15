@@ -87,6 +87,22 @@ func init() {
 	})
 }
 
+func init() {
+	register(Attack{
+		ID:      "l1-tool-poisoning",
+		Level:   "L1",
+		Family:  "04",
+		Title:   "Tool descriptions or parameters hide instructions to the AI model",
+		Checks:  []scenario.Check{{Fact: "tool_metadata_flagged"}},
+		Network: "none",
+		Run:     toolPoisoning,
+	})
+}
+
+// toolPoisoning needs no calls: the tool list the client already fetched is
+// recorded, and the oracle applies the detection rules to it.
+func toolPoisoning(context.Context, *mcp.Client, []mcp.Tool, Env) error { return nil }
+
 // leakyErrors sends malformed input to every tool and to an unknown tool,
 // then lets the oracle inspect the error replies.
 func leakyErrors(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ Env) error {
