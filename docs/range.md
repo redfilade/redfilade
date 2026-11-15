@@ -14,20 +14,21 @@ Redfilade never runs a target directly on your machine. With no container runtim
 ```sh
 go build -o redfilade ./cmd/redfilade
 scripts/build-targets.sh                 # builds redfilade-target/<name>:{vulnerable,secure}
-./redfilade scenario validate            # checks every scenarios/*/scenario.json
-./redfilade range gate                   # runs every scenario's twins and checks the outcomes
+./redfilade scenario list                # built-in scenarios
+./redfilade scenario validate            # checks every built-in scenario
+./redfilade range gate                   # runs every built-in scenario's twins and checks the outcomes
 ```
 
 Run a single twin:
 
 ```sh
-./redfilade range run scenarios/l1-leaky-errors --build vulnerable
+./redfilade range run l1-leaky-errors --build vulnerable
 ```
 
-Test your own MCP server (packaged as an image) with the L1 battery:
+Test your own MCP server (packaged as an image) with the L1 or L2 battery (L2 includes L1):
 
 ```sh
-./redfilade test --image ghcr.io/you/your-server:dev --level L1 --sarif results.sarif
+./redfilade test --image ghcr.io/you/your-server:dev --level L2 --sarif results.sarif
 ```
 
 Before anything runs, Redfilade shows what the cell can touch and waits for **y**. The default is No. In CI, pass `--yes`.
@@ -36,7 +37,7 @@ Before anything runs, Redfilade shows what the cell can touch and waits for **y*
 
 | | |
 |---|---|
-| Network | none (`--network none`) |
+| Network | none (`--network none`), or for scenarios that need it a per-run internal network whose only other member is the egress sink |
 | Filesystem | read-only root, a 16 MB no-exec `/tmp`, and the run's own `/world` |
 | Privileges | non-root user 65532, all capabilities dropped, `no-new-privileges` |
 | Limits | 256 MB memory, 1 CPU, 128 processes |
@@ -93,6 +94,30 @@ A scenario is a directory under `scenarios/` with a `scenario.json` (ADR-0013). 
 
 - **Canaries** (`{{canary.NAME}}`) get a fresh random value every run, so a leak cannot be faked by guessing.
 - **Exploit steps** are MCP tool calls written as data, or a built-in battery attack.
-- **Oracle facts** available today: `canary_leaked` (a canary crossed from the target to the client), `internals_leaked` (stack traces, source paths, connection strings) and `world_file_changed`.
+- **Oracle facts** available today: `canary_leaked` (a canary crossed from the target to the client), `internals_leaked` (stack traces, source paths, connection strings), `world_file_changed`, `secret_pattern_leaked` (well-known credential formats), `sensitive_file_read` (system file contents in replies), `egress_reached_sink` and `canary_egressed` (with `"needs": {"network": "sink"}`).
 
 Targets live in `targets/<name>/` as a Go program built twice with `-X main.mode=vulnerable|secure`, into `FROM scratch` images by `scripts/build-targets.sh`.
+
+## Scenario packs
+
+A directory with a `scenario.json` that is not built into your binary is an **external pack** (ADR-0016). Its identity is the sha256 of the exact file:
+
+```sh
+./redfilade pack digest ./my-pack        # sha256:…
+./redfilade pack verify ./my-pack        # verified, unsigned, unverifiable or invalid
+```
+
+| Signature | What happens |
+|---|---|
+| verified (signed by our release workflow, checked with `cosign`) | Runs after consent; both images must be pinned by digest |
+| invalid | Always refused |
+| unsigned or unverifiable | Refused unless you pass `--allow-unsigned` and confirm the pack id (typed at the prompt, or `--confirm ID`). Without a terminal you must also allow the exact digest with `--allow-digest sha256:…` or `--allowlist FILE` |
+
+```sh
+./redfilade range run ./my-pack --build vulnerable --allow-unsigned
+./redfilade range gate ./my-pack --yes --allow-unsigned --confirm my-pack --allow-digest sha256:…
+```
+
+## Contributing a scenario
+
+Open a pull request that adds `scenarios/<id>/scenario.json` (the directory name must equal the id). A maintainer reviews it and applies the `triage` label; `triage.yml` then runs it against the twins built from the base branch, with no secrets, and writes a summary to the job page. New twins are reviewed and merged before scenarios that use them can be triaged.

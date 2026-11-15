@@ -23,4 +23,4 @@
 
 - The cell is a hardened container, not yet a microVM (ADR-0001). Reports say which tier ran.
 - File reads and process execution inside the cell are not observed yet; every report lists this.
-- Scenarios that declare the egress sink still run with no network until the sink exists.
+- Scenarios that declare the egress sink ran with no network in this phase; the sink arrived in Phase 2 (`docs/phase-2.md`).

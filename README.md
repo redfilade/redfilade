@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-E5383B"></a>
-  <img alt="Status: Phase 0" src="https://img.shields.io/badge/status-phase%200%20%C2%B7%20foundation-10141C">
+  <img alt="Status: Phase 2" src="https://img.shields.io/badge/status-phase%202%20%C2%B7%20the%20range-10141C">
   <a href="SECURITY.md"><img alt="Report a vulnerability privately" src="https://img.shields.io/badge/security-private%20reporting-10141C"></a>
 </p>
 
@@ -24,7 +24,7 @@ It has two front doors on one engine:
 Both share one execution engine, one oracle and one evidence format. An attack discovered in the Range becomes a test that every builder can run the next day.
 
 > [!IMPORTANT]
-> **Redfilade is early (Phase 1).** The range runs, attacks and judges its first scenario end to end in hardened container cells. The battery is small, and hosted features are not built yet. See the [roadmap](#roadmap).
+> **Redfilade is early (Phase 2).** The Range runs, attacks and judges L1 and L2 scenarios end to end in hardened container cells, with an egress sink, signed scenario packs and a triage lane for contributions. Hosted features are not built yet. See the [roadmap](#roadmap).
 
 ## Try it
 
@@ -32,7 +32,7 @@ Both share one execution engine, one oracle and one evidence format. An attack d
 go build -o redfilade ./cmd/redfilade
 scripts/build-targets.sh        # needs Docker
 ./redfilade range gate          # every vulnerable twin must be exploited, every secure twin must hold
-./redfilade test --image ghcr.io/you/your-mcp-server:dev --level L1 --sarif results.sarif
+./redfilade test --image ghcr.io/you/your-mcp-server:dev --level L2 --sarif results.sarif
 ```
 
 Full guide: [`docs/range.md`](docs/range.md).
@@ -99,7 +99,7 @@ Every report states which level ran, the verdict per scenario, **what could not 
 
 - [ ] **Phase 0: Foundation.** Hardened organisation, rulesets, pinned and least-privilege CI, secret scanning, dependency policy, threat model, ADR-001 to ADR-012, multi-tenant schema, a proven signed dry-run release. Tracked in [`docs/phase-0.md`](docs/phase-0.md).
 - [ ] **Phase 1: Walking skeleton.** `redfilade test --level L1` runs one attack against a vulnerable and a secure twin, the oracle observes it, and a signed SARIF report comes out. Built; the signed proof runs in the release workflow. Tracked in [`docs/phase-1.md`](docs/phase-1.md).
-- [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks.
+- [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. Tracked in [`docs/phase-2.md`](docs/phase-2.md).
 - [ ] **Phase 3: Hosted Test Bench.** Domain verification, remote targets and L3 agent-in-the-loop testing.
 
 ## Repository layout
@@ -108,12 +108,13 @@ Every report states which level ran, the verdict per scenario, **what could not 
 .github/            CI (untrusted lane), release (trusted lane), CODEOWNERS, ruleset
 assets/brand/       Mascot artwork, banner, avatar and flat vector logo, plus their build scripts
 cmd/redfilade/      CLI (Go)
-internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery
+internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery, packs, triage
+infra/sink/         Egress sink: records requests from cells, never forwards them
 scenarios/          Range scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action for builders
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 001 to 012
+docs/adr/           Architecture Decision Records 0001 to 0016
 docs/threat-model/  STRIDE threat model of the four planes
 harness/            Attack harness and scenario SDK (Python)
 ```
