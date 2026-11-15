@@ -15,7 +15,7 @@
 | Pack digest, signature check and policy (ADR-0016) | `internal/pack` | ✅ |
 | Consent screen shows source and signature | `internal/consent` | ✅ |
 | CLI: `scenario list`, `scenario validate`, `pack digest`, `pack verify`, policy flags | `cmd/redfilade` | ✅ |
-| Release signs every scenario as a pack and verifies it with the CLI | `release.yml` → `range-proof` | ⬜ runs with the Phase 1 dry run (needs the `release` environment) |
+| Release signs every scenario as a pack and verifies it with the CLI | `release.yml` → `range-proof` | ✅ Every scenario signed as a pack and verified by the CLI in the `0.0.1` dry run ([run](https://github.com/redfilade/redfilade/actions/runs/43725367896)) |
 | Triage lane for contributed scenarios | `triage.yml`, `redfilade triage summarize` | ✅ needs the `triage` label created (below) |
 
 ## Maintainer steps

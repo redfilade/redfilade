@@ -13,7 +13,7 @@ Phase 0 is done when every item below is ticked. No feature code lands before th
 | 5 | Dependency policy committed: pnpm settings, uv lock, `go.sum` | [`pnpm-workspace.yaml`](../pnpm-workspace.yaml), [`.npmrc`](../.npmrc), [`pyproject.toml`](../pyproject.toml), [`uv.lock`](../uv.lock), [`go.mod`](../go.mod) | ✅ Committed. `go.sum` appears with the first Go dependency; CI already builds with `-mod=readonly` |
 | 6 | `SECURITY.md`, threat model v0 (STRIDE on the four planes), ADR-001 to ADR-012 | [`SECURITY.md`](../SECURITY.md), [`threat-model/v0.md`](threat-model/v0.md), [`adr/`](adr/) | ✅ Committed |
 | 7 | Multi-tenant schema skeleton: `org_id`, `project_id`, RLS migration, UUIDv7 | [`db/migrations/0001_tenancy.sql`](../db/migrations/0001_tenancy.sql), [`db/tests/tenancy_test.sql`](../db/tests/tenancy_test.sql) | ✅ Committed; isolation test passes on Postgres 18 |
-| 8 | Release workflow proven with a dry-run `0.0.1`: cosign signature, SBOM, provenance | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | ✅ Committed · ⬜ run the dry run (step E). Trusted publishing to npm and PyPI is added with the first published package |
+| 8 | Release workflow proven with a dry-run `0.0.1`: cosign signature, SBOM, provenance | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | ✅ Dry run `0.0.1` passed on 2026-11-15 ([run](https://github.com/redfilade/redfilade/actions/runs/43725367896)): binaries, SBOM, keyless cosign signature verified, SLSA provenance. Trusted publishing to npm and PyPI is added with the first published package |
 
 ## One-time steps for an org owner
 
