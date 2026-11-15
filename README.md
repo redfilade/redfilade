@@ -1,8 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/redfilade-lockup-dark.svg">
-    <img alt="Redfilade" src="assets/brand/redfilade-lockup-light.svg" width="440">
-  </picture>
+  <img alt="Redfilade: the MCP red-team range. A small hooded robot mascot with glowing red eyes beside the Redfilade wordmark." src="assets/brand/redfilade-banner.png" width="100%">
 </p>
 
 <p align="center">
@@ -93,6 +90,22 @@ Full guide: [`docs/range.md`](docs/range.md).
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
 
+## Where Cisco comes in
+
+Redfilade reuses one part of [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner): its **detection rules**. Nothing else.
+
+| | |
+|---|---|
+| **What we use** | Cisco's 10 detection rules for malicious MCP text: tool poisoning, prompt injection, coercive injection, credential harvesting, data exfiltration, command, code, script and SQL injection, and system manipulation. Copied unmodified into [`internal/rules/cisco/`](internal/rules/cisco/) |
+| **What they power** | The `tool_metadata_flagged` check (tool descriptions and parameters), the `output_injection_flagged` check (tool output), the L1 `l1-tool-poisoning` battery check and the `l1-tool-poisoning` practice scenario |
+| **How they run** | Inside Redfilade's own Go engine ([`internal/rules`](internal/rules/)), tested to give exactly the same results as the official YARA engine on Cisco's test cases. Cisco's code never runs |
+| **What you need** | **Nothing extra.** The rules are built into the `redfilade` binary. No Cisco account, API key, Python, YARA or internet connection is needed, and nothing is sent to Cisco |
+| **What we do not use** | Cisco's scanner program, its cloud, AI-model and VirusTotal analysers, and its example malicious servers |
+| **License** | The rules stay under the Apache License 2.0 with Cisco's copyright ([`LICENSE`](internal/rules/cisco/LICENSE), [`SOURCE.md`](internal/rules/cisco/SOURCE.md)). Cisco does not endorse Redfilade |
+| **Updates** | Maintainers only: copy the new rules, refresh the checksums, regenerate the test corpus with [`scripts/cisco-rules-golden.py`](scripts/cisco-rules-golden.py) (needs `yara-python`), and review every change. See [ADR-0018](docs/adr/0018-reuse-cisco-mcp-scanner-rules.md) |
+
+A rule match is a strong warning sign, not proof of intent: every report names the rule that fired and shows the matching text.
+
 ## Rules of engagement
 
 1. **Attack only what you own or are explicitly authorised to test.** Hosted remote testing, when it arrives, will require proof of domain ownership before a single request is sent.
@@ -137,7 +150,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 
 ```text
 .github/            CI (untrusted lane), release (trusted lane), triage lane, CODEOWNERS, rulesets
-assets/brand/       Logo, mascot and social preview
+assets/brand/       Banner, logo, mascot and social preview
 cmd/redfilade/      CLI (Go)
 internal/           MCP client, scenarios, world, sandbox, consent, oracle, detection rules, reports, battery, packs, triage
 infra/sink/         Egress trap: records requests from cells, never forwards them
@@ -180,4 +193,4 @@ Redfilade is **source-available** and free. You choose one of two licenses ([`LI
 
 Versions published before this change remain under the Apache License 2.0 they were released with.
 
-**Third-party code.** The detection rules in `internal/rules/cisco/` come from [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner) and remain under the Apache License 2.0 (see the `LICENSE` and `SOURCE.md` files in that directory). Cisco does not endorse Redfilade.
+**Third-party code.** The detection rules in `internal/rules/cisco/` come from Cisco's MCP Scanner and remain under the Apache License 2.0. See [Where Cisco comes in](#where-cisco-comes-in).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild the avatar, social preview and banner from assets/brand/mascot/redfilade-mascot.png.
+# Rebuild the avatar and social preview from assets/brand/mascot/redfilade-mascot.png.
 # The mascot artwork is used as-is: only cropped and framed. The wordmark is drawn over it.
 # Needs: Python 3 with numpy + Pillow, Node + npm, Google Chrome. Fonts (SIL OFL) are installed
 # at pinned versions into a temp folder with install scripts disabled, never into the repo.
@@ -18,5 +18,4 @@ shot() { google-chrome --headless=new --no-sandbox --hide-scrollbars --virtual-t
   --window-size="$2,$3" --screenshot="$OUT/$4" "http://127.0.0.1:$PORT/word.html?mode=$1" 2>/dev/null
   [ "$(wc -c < "$OUT/$4")" -gt 150000 ] || { echo "render of $4 looks wrong (too small)" >&2; exit 1; }; }
 shot social 1280 640 redfilade-social-1280x640.png
-shot banner 1600 520 redfilade-banner-1600x520.png
 echo "Built into $OUT"
