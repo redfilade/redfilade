@@ -34,6 +34,8 @@ type Plan struct {
 	Origin     string // "built-in" or "external pack"
 	Digest     string // external packs only
 	Signature  string // built-in, verified, unsigned, unverifiable
+	Model      string // L3 agent scenarios: the model that acts
+	Trials     int    // L3 agent scenarios: independent runs
 }
 
 // ErrRefused means the plan is not allowed on this machine at all.
@@ -103,6 +105,15 @@ func (p Plan) Render() string {
 	} else {
 		line("Env vars", strings.Join(p.EnvNames, ", "))
 	}
+	if p.Model != "" {
+		line("Agent model", p.Model)
+		line("Trials", fmt.Sprintf("%d (a fresh cell for each)", p.Trials))
+		if strings.HasPrefix(p.Model, "anthropic:") {
+			line("Data", "the task, tool list and tool outputs (synthetic data only) are sent to the model API")
+		} else {
+			line("Data", "a scripted stand-in model on this machine; nothing leaves it")
+		}
+	}
 	switch p.Tier {
 	case sandbox.TierGVisor:
 		line("Isolation", "gVisor (separate kernel boundary)")
@@ -132,10 +143,97 @@ func (p Plan) Render() string {
 
 // Ask prints the screen and returns true only for an explicit "y" or "yes".
 // Anything else, including an empty line or end of input, is No.
-func Ask(p Plan, in io.Reader, out io.Writer) bool {
+// Screen is anything the user can be asked to approve.
+type Screen interface {
+	Render() string
+	Check() error
+}
+
+func Ask(p Screen, in io.Reader, out io.Writer) bool {
 	fmt.Fprint(out, p.Render())
 	fmt.Fprint(out, "\nRun it? [y/N] ")
 	line, _ := bufio.NewReader(io.LimitReader(in, 64)).ReadString('\n')
 	ans := strings.ToLower(strings.TrimSpace(line))
 	return ans == "y" || ans == "yes"
+}
+
+// RemotePlan is what the user agrees to before Redfilade tests a server it
+// reaches over the network. There is no cell: requests go to the URL.
+type RemotePlan struct {
+	URL      string
+	Level    string
+	Attacks  []string
+	Requests int    // upper bound on HTTP requests the run sends
+	Proof    string // why Redfilade may test this host (loopback or verified domain)
+	Token    bool   // a bearer token will be sent
+}
+
+// Check refuses remote plans that are malformed.
+func (p RemotePlan) Check() error {
+	if !strings.HasPrefix(p.URL, "http://") && !strings.HasPrefix(p.URL, "https://") {
+		return fmt.Errorf("%w: only http and https URLs can be tested", ErrRefused)
+	}
+	if p.Proof == "" {
+		return fmt.Errorf("%w: %s is neither on this machine nor a verified domain", ErrRefused, p.URL)
+	}
+	return nil
+}
+
+// Render returns the consent screen for a remote test.
+func (p RemotePlan) Render() string {
+	var b strings.Builder
+	line := func(k, v string) { fmt.Fprintf(&b, "  %-12s %s\n", k, v) }
+	b.WriteString("Redfilade is about to test an MCP server over the network.\n\n")
+	line("URL", p.URL)
+	line("Allowed by", p.Proof)
+	line("Level", p.Level)
+	line("Attacks", strings.Join(p.Attacks, ", "))
+	line("Requests", fmt.Sprintf("at most about %d, read-only payloads, nothing deleted or written on purpose", p.Requests))
+	if p.Token {
+		line("Credentials", "your token is sent to this URL only, and redacted from reports")
+	} else {
+		line("Credentials", "none")
+	}
+	line("Isolation", "none: the server runs on its own infrastructure, not in a Redfilade cell")
+	b.WriteString("\nOnly test servers you own or are authorised to test (DISCLAIMER.md).\n")
+	return b.String()
+}
+
+// DefencePlan is what the user agrees to before L5 measures a defence.
+type DefencePlan struct {
+	Image     string
+	Attacks   int // scenarios run against vulnerable twins
+	Benign    int // benign tasks run against secure twins
+	Tier      sandbox.Tier
+	Pull      string
+	ModelNote string
+}
+
+// Check refuses a plan without isolation or an image.
+func (p DefencePlan) Check() error {
+	if p.Image == "" {
+		return fmt.Errorf("%w: no defence image", ErrRefused)
+	}
+	if p.Tier == sandbox.TierNone {
+		return fmt.Errorf("%w: no container runtime, so nothing can be isolated", ErrRefused)
+	}
+	return nil
+}
+
+// Render returns the consent screen for an L5 run.
+func (p DefencePlan) Render() string {
+	var b strings.Builder
+	line := func(k, v string) { fmt.Fprintf(&b, "  %-12s %s\n", k, v) }
+	b.WriteString("Redfilade is about to measure a defence (L5).\n\n")
+	line("Defence", p.Image+" (runs in its own cell: no network, read-only, all privileges dropped)")
+	line("Attacks", fmt.Sprintf("%d scenarios against their vulnerable twins, through the defence", p.Attacks))
+	line("Benign set", fmt.Sprintf("%d tasks against secure twins, to count false positives", p.Benign))
+	line("Isolation", string(p.Tier))
+	if p.Pull == "missing" {
+		line("Image pull", "the defence image may be pulled if it is not present locally")
+	}
+	if p.ModelNote != "" {
+		line("Agents", p.ModelNote)
+	}
+	return b.String()
 }

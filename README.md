@@ -76,6 +76,21 @@ Test an MCP server **you own**, packaged as a container image:
 ./redfilade test --image my-mcp-server:dev --level L2 --sarif results.sarif
 ```
 
+Or, for a Streamable HTTP server on your machine, or on a domain you have verified with `redfilade domain verify` (tokens are read from the environment variable you name):
+
+```sh
+./redfilade test --url http://127.0.0.1:8080/mcp --token-env MY_SERVER_TOKEN --level L2
+./redfilade test --url https://api.example.com/mcp --token-env MY_SERVER_TOKEN --level L2
+```
+
+Test your **MCP client** against a hostile server, or score a **defence** (gateway or guardrail) on attacks stopped versus normal work broken:
+
+```sh
+./redfilade hostile-server --log /tmp/session.jsonl      # add to your client's MCP config, use it, then:
+./redfilade client-report /tmp/session.jsonl
+./redfilade defend --defence-image my-gateway-adapter:dev --min-block-rate 0.8 --max-false-positive-rate 0.05
+```
+
 Full guide: [`docs/range.md`](docs/range.md).
 
 ## Scenarios today
@@ -87,6 +102,10 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-ssrf` | L2 | A "fetch a preview" tool tricked into calling a server it should not reach |
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
 | `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
+| `l2-command-injection` | L2 | A ping tool that pastes input into a shell command, so `;` and `$(...)` read a deploy key |
+| `l4-hostile-server` | L4 | A malicious server hides instructions in invisible text, phishes for a password and abuses sampling against a client |
+| `l3-inbox-injection` | L3 | An email asks the AI assistant to forward the inbox, including a reset code, to an outside address |
+| `l2-sql-injection` | L2 | A customer lookup that pastes input into SQL, so a quote and `UNION` read an API key from another table |
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
 
@@ -108,7 +127,7 @@ A rule match is a strong warning sign, not proof of intent: every report names t
 
 ## Rules of engagement
 
-1. **Attack only what you own or are explicitly authorised to test.** Hosted remote testing, when it arrives, will require proof of domain ownership before a single request is sent.
+1. **Attack only what you own or are explicitly authorised to test.** Remote servers can only be tested after you prove you control their domain, and the proof is checked again before every run.
 2. **Practice targets are deliberately vulnerable.** Run them only inside Redfilade's isolation. Never expose them to the internet.
 3. **Found a flaw in someone else's MCP server while testing with permission?** Report it privately to its maintainers and give them time to fix it before you publish.
 4. **Found a flaw in Redfilade itself?** Use [private vulnerability reporting](SECURITY.md), never a public issue.
@@ -134,17 +153,18 @@ Today a cell is a hardened container: no network or a private trap network, read
 | Level | Checks | Status |
 |---|---|---|
 | **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
-| **L2** Security battery | Path traversal, SSRF, secrets in output, then injection, token audience, rate limits | Three attacks available |
-| **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | Planned |
-| **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
-| **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Planned |
+| **L2** Security battery | Path traversal, SSRF, secrets in output, command injection, SQL injection, and over HTTP: token audience, rate limits, routing-header mismatch | Eight attacks available |
+| **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | First scenario available: success rate with a 95% interval |
+| **L4** Client and host | A client facing a hostile server: hidden text, password phishing, sampling abuse | Available: Range twins and your own client |
+| **L5** Defence | A gateway or guardrail measured against every scenario and a benign task set | Available: block rate and false-positive rate with 95% intervals |
 
 ## Roadmap
 
 - [ ] **Phase 0: Foundation.** Hardened organisation, pinned least-privilege CI, secret scanning, dependency policy, threat model, multi-tenant schema, a proven signed dry-run release. Code done; maintainer setup steps in [`docs/phase-0.md`](docs/phase-0.md).
 - [ ] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. Built; the signed proof runs with the first release dry run. [`docs/phase-1.md`](docs/phase-1.md)
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. [`docs/phase-2.md`](docs/phase-2.md)
-- [ ] **Phase 3: Hosted Test Bench.** Domain verification, remote targets and L3 agent-in-the-loop testing.
+- [x] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and the hosted service for remote tests ([`docs/bench.md`](docs/bench.md)). OAuth sign-in and hosted Range cells follow. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
+- [x] **Phase 4: Clients and defences.** L4 hostile server for testing MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set. Tracked in [`docs/phase-4.md`](docs/phase-4.md).
 
 ## Repository layout
 
@@ -152,13 +172,14 @@ Today a cell is a hardened container: no network or a private trap network, read
 .github/            CI (untrusted lane), release (trusted lane), triage lane, CODEOWNERS, rulesets
 assets/brand/       Banner, logo, mascot and social preview
 cmd/redfilade/      CLI (Go)
+cmd/redfilade-bench/ Hosted Test Bench service (Go)
 internal/           MCP client, scenarios, world, sandbox, consent, oracle, detection rules, reports, battery, packs, triage
 infra/sink/         Egress trap: records requests from cells, never forwards them
 scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0018
+docs/adr/           Architecture Decision Records 0001 to 0024
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```

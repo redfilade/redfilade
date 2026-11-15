@@ -113,7 +113,7 @@ func buildTwins(t *testing.T) string {
 
 var canaryRe = regexp.MustCompile(`CANARY_[A-Z0-9_]+_[A-Z2-7]{26}`)
 
-var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning"}
+var targetNames = []string{"leaky-errors", "path-traversal", "ssrf", "secrets-in-output", "tool-poisoning", "command-injection", "sql-injection", "inbox-injection", "mcp-client", "defence-rules"}
 
 func allScenarioDirs(t *testing.T) []string {
 	m, err := filepath.Glob("../../scenarios/*/scenario.json")
@@ -139,7 +139,7 @@ func TestRangeGateEndToEnd(t *testing.T) {
 	if code != exitPass {
 		t.Fatalf("gate exit %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 	}
-	for _, id := range []string{"l1-leaky-errors", "l1-tool-poisoning", "l2-path-traversal", "l2-ssrf", "l2-secrets-in-output"} {
+	for _, id := range []string{"l1-leaky-errors", "l1-tool-poisoning", "l2-command-injection", "l2-path-traversal", "l2-sql-injection", "l2-ssrf", "l2-secrets-in-output", "l3-inbox-injection", "l4-hostile-server"} {
 		if !regexp.MustCompile(id+` \[vulnerable\]\s+exploited`).MatchString(stdout.String()) ||
 			!regexp.MustCompile(id+` \[secure\]\s+not_exploited`).MatchString(stdout.String()) {
 			t.Fatalf("unexpected summary for %s:\n%s", id, stdout.String())
@@ -247,7 +247,7 @@ func TestRefusesWithoutContainerRuntime(t *testing.T) {
 func TestImageIsRequired(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := Main(context.Background(), []string{"test", "--server", "npx evil"}, strings.NewReader(""), &stdout, &stderr, sandbox.Runner{})
-	if code != exitError || !strings.Contains(stderr.String(), "--image is required") {
+	if code != exitError || !strings.Contains(stderr.String(), "--image or --url is required") {
 		t.Fatalf("exit %d\n%s", code, stderr.String())
 	}
 }
@@ -335,5 +335,41 @@ func TestBuiltinByID(t *testing.T) {
 		strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
 	if code != exitError {
 		t.Fatalf("unknown id should fail, got %d", code)
+	}
+}
+
+func TestAgentScenarioModels(t *testing.T) {
+	shim := buildTwins(t)
+	for _, tc := range []struct {
+		model, build string
+		want         int
+	}{
+		{"scripted:naive", "vulnerable", exitFindings},
+		{"scripted:naive", "secure", exitPass},
+		{"scripted:careful", "vulnerable", exitPass},
+	} {
+		out := t.TempDir()
+		var stdout, stderr bytes.Buffer
+		code := Main(context.Background(), []string{"range", "run", "l3-inbox-injection", "--build", tc.build, "--model", tc.model, "--trials", "2", "--yes", "--out", out},
+			strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim})
+		if code != tc.want {
+			t.Fatalf("%s %s: exit %d want %d\n%s%s", tc.model, tc.build, code, tc.want, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "Agent model") || !strings.Contains(stdout.String(), "of 2 completed trials") {
+			t.Errorf("%s %s: consent screen or summary lacks agent details:\n%s", tc.model, tc.build, stdout.String())
+		}
+		b, _ := os.ReadFile(filepath.Join(out, "evidence-l3-inbox-injection-"+tc.build+".json"))
+		if canaryRe.Match(b) {
+			t.Errorf("%s %s: evidence holds a raw canary", tc.model, tc.build)
+		}
+		if !strings.Contains(string(b), `"transcripts"`) {
+			t.Errorf("%s %s: evidence lacks transcripts", tc.model, tc.build)
+		}
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "") // never reach the real API from tests
+	var stdout, stderr bytes.Buffer
+	if code := Main(context.Background(), []string{"range", "run", "l3-inbox-injection", "--build", "secure", "--model", "anthropic:x-model", "--yes"},
+		strings.NewReader(""), &stdout, &stderr, sandbox.Runner{Binary: shim}); code != exitError {
+		t.Errorf("anthropic model without a key should fail, got %d", code)
 	}
 }

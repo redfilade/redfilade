@@ -30,13 +30,19 @@ type Attack struct {
 	Env   []scenario.EnvVar
 	// Network the attack needs in builder mode: "none" or "sink".
 	Network string
-	Run     func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env Env) error
+	// HTTPOnly attacks need a target reached over Streamable HTTP.
+	HTTPOnly bool
+	// Remote marks attacks safe to run against a live server reached by URL:
+	// read-only payloads, no planted world, no sink.
+	Remote bool
+	Run    func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env Env) error
 }
 
 // Env is what an attack may know about the run.
 type Env struct {
-	Canaries map[string]string // planted canary values by name
-	SinkURL  string            // base URL of the egress sink, "" without a sink
+	Canaries map[string]string  // planted canary values by name
+	SinkURL  string             // base URL of the egress sink, "" without a sink
+	HTTP     *mcp.HTTPTransport // the transport, when the target is reached over HTTP
 }
 
 var registry = map[string]Attack{}
@@ -78,6 +84,7 @@ const maxToolsProbed = 25
 func init() {
 	register(Attack{
 		ID:      "l1-leaky-errors",
+		Remote:  true,
 		Level:   "L1",
 		Family:  "08",
 		Title:   "Error messages leak internals or secrets",
@@ -90,6 +97,7 @@ func init() {
 func init() {
 	register(Attack{
 		ID:      "l1-tool-poisoning",
+		Remote:  true,
 		Level:   "L1",
 		Family:  "04",
 		Title:   "Tool descriptions or parameters hide instructions to the AI model",

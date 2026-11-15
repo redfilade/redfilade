@@ -5,6 +5,10 @@
 //	redfilade scenario validate [DIR...]
 //	redfilade pack digest DIR | pack verify DIR
 //	redfilade triage summarize DIR
+//	redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list
+//	redfilade hostile-server [--probes all] [--log FILE]   (stdio; for your own MCP client)
+//	redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
+//	redfilade client-report FILE [--sarif FILE]
 //	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
 //	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
@@ -16,18 +20,29 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/netip"
+	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
+	"github.com/redfilade/redfilade/internal/defence"
+	"github.com/redfilade/redfilade/internal/domain"
+	"github.com/redfilade/redfilade/internal/hostile"
+	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
 	"github.com/redfilade/redfilade/internal/pack"
 	"github.com/redfilade/redfilade/internal/report"
@@ -76,6 +91,14 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		}
 		usage(stderr)
 		return exitError
+	case "domain":
+		return cmdDomain(ctx, args[1:], stdout, stderr)
+	case "defend":
+		return cmdDefend(ctx, args[1:], stdin, stdout, stderr, runner)
+	case "hostile-server":
+		return cmdHostileServer(ctx, args[1:], stdin, stdout, stderr)
+	case "client-report":
+		return cmdClientReport(args[1:], stdout, stderr)
 	case "triage":
 		if len(args) == 3 && args[1] == "summarize" {
 			rows, skipped, err := triage.Load(args[2])
@@ -121,6 +144,12 @@ Usage:
   redfilade pack digest DIR
   redfilade pack verify DIR
   redfilade triage summarize DIR
+  redfilade domain challenge DOMAIN
+  redfilade domain verify DOMAIN
+  redfilade domain list
+  redfilade hostile-server [--probes all] [--log FILE]
+  redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
+  redfilade client-report FILE [--sarif FILE] [--out DIR]
   redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
@@ -230,6 +259,8 @@ type common struct {
 	confirm       string
 	allowDigests  digestList
 	allowlist     string
+	model         string
+	trials        int
 }
 
 type digestList []string
@@ -245,6 +276,8 @@ func addCommon(fs *flag.FlagSet, c *common) {
 	fs.StringVar(&c.confirm, "confirm", "", "the external pack id, confirming you want to run it unsigned")
 	fs.Var(&c.allowDigests, "allow-digest", "exact external pack digest allowed in non-interactive runs (repeatable)")
 	fs.StringVar(&c.allowlist, "allowlist", "", "file of allowed external pack digests, one per line")
+	fs.StringVar(&c.model, "model", "scripted:naive", "model for L3 agent scenarios: scripted:naive, scripted:careful or anthropic:<model-id> (needs ANTHROPIC_API_KEY)")
+	fs.IntVar(&c.trials, "trials", 0, "trials per L3 agent scenario (0 = the scenario's default, at most 50)")
 }
 
 // target is a scenario resolved from an id (built-in) or a directory (pack).
@@ -313,7 +346,7 @@ func isTerminal(r io.Reader) bool {
 }
 
 // approve shows the consent screen and decides.
-func approve(p consent.Plan, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
+func approve(p consent.Screen, c common, stdin io.Reader, stdout, stderr io.Writer) bool {
 	if err := p.Check(); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return false
@@ -373,6 +406,10 @@ func summary(w io.Writer, label string, ev *report.Evidence) {
 		fmt.Fprintf(w, "  (%s)", strings.Join(facts, ", "))
 	}
 	fmt.Fprintln(w)
+	if a := ev.Agent; a != nil {
+		fmt.Fprintf(w, "    agent %s: hijacked in %d of %d completed trials (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+			a.Model, a.Exploited, a.Completed, a.Rate*100, a.Interval95[0]*100, a.Interval95[1]*100)
+	}
 	for _, e := range ev.Errors {
 		fmt.Fprintln(w, "    note:", report.Clean(e, 300))
 	}
@@ -398,10 +435,10 @@ func cmdRangeRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	}
 	m := t.m
 	o, tier := opts(ctx, runner, c)
-	if !approve(consent.FromManifest(m, *build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
+	if !approve(scenarioPlan(m, *build, tier, t, c), c, stdin, stdout, stderr) {
 		return exitError
 	}
-	ev, err := run.Scenario(ctx, m, *build, o)
+	ev, err := runScenario(ctx, m, *build, o, c)
 	if err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
@@ -461,10 +498,10 @@ func cmdRangeGate(ctx context.Context, args []string, stdin io.Reader, stdout, s
 	for _, t := range targets {
 		m := t.m
 		for _, build := range []string{"vulnerable", "secure"} {
-			if !approve(consent.FromManifest(m, build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
+			if !approve(scenarioPlan(m, build, tier, t, c), c, stdin, stdout, stderr) {
 				return exitError
 			}
-			ev, err := run.Scenario(ctx, m, build, o)
+			ev, err := runScenario(ctx, m, build, o, c)
 			if err != nil {
 				fmt.Fprintln(stderr, "redfilade:", err)
 				return exitError
@@ -505,7 +542,10 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs.SetOutput(stderr)
 	var c common
 	addCommon(fs, &c)
-	image := fs.String("image", "", "container image of the MCP server under test (required)")
+	image := fs.String("image", "", "container image of the MCP server under test (stdio)")
+	url := fs.String("url", "", "URL of an MCP server reached over Streamable HTTP (on this machine, or a verified domain)")
+	tokenEnv := fs.String("token-env", "", "name of an environment variable holding the server's bearer token")
+	foreignEnv := fs.String("foreign-token-env", "", "name of an environment variable holding a valid token issued for a DIFFERENT audience (audience check)")
 	server := fs.String("server", "", `command to start the server inside the image, e.g. "node dist/index.js"`)
 	level := fs.String("level", "L1", "test level: L1, or L2 (includes L1)")
 	protocol := fs.String("protocol", "2026-07-28", "MCP protocol revision: 2026-07-28 or 2025-11-25")
@@ -515,8 +555,12 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err := fs.Parse(args); err != nil {
 		return exitError
 	}
-	if *image == "" {
-		fmt.Fprintln(stderr, "redfilade: --image is required. Redfilade never runs a server directly on your machine; package it as a container image first.")
+	if *image != "" && *url != "" {
+		fmt.Fprintln(stderr, "redfilade: use either --image or --url, not both")
+		return exitError
+	}
+	if *image == "" && *url == "" {
+		fmt.Fprintln(stderr, "redfilade: --image or --url is required. Redfilade never runs a server directly on your machine; package it as a container image, or test one you already run with --url.")
 		return exitError
 	}
 	if *protocol != "2026-07-28" && *protocol != "2025-11-25" {
@@ -526,6 +570,9 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if len(battery.ForLevel(*level)) == 0 {
 		fmt.Fprintf(stderr, "redfilade: level %s has no attacks yet (available: L1, L2)\n", *level)
 		return exitError
+	}
+	if *url != "" {
+		return cmdTestRemote(ctx, *url, *tokenEnv, *foreignEnv, *level, *protocol, c, reportFiles{*sarif, *junit, *location}, stdin, stdout, stderr)
 	}
 	o, tier := opts(ctx, runner, c)
 	p := consent.Plan{ScenarioID: "battery-" + strings.ToLower(*level), Kind: "battery", Level: *level, Family: "multiple",
@@ -543,22 +590,29 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	summary(stdout, *image+" ["+*level+"]", ev)
-	if _, err := writeFile(c.out, "evidence-test-"+*level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+	return finishTest(ev, *image, *level, c, reportFiles{*sarif, *junit, *location}, stdout, stderr)
+}
+
+type reportFiles struct{ sarif, junit, location string }
+
+// finishTest prints the summary, writes the reports and picks the exit code.
+func finishTest(ev *report.Evidence, label, level string, c common, rf reportFiles, stdout, stderr io.Writer) int {
+	summary(stdout, label+" ["+level+"]", ev)
+	if _, err := writeFile(c.out, "evidence-test-"+level+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
-	if *sarif != "" {
-		if _, err := writeFile(filepath.Dir(*sarif), filepath.Base(*sarif), func(w io.Writer) error {
-			return report.WriteSARIF(w, ev, version.Version, *location)
+	if rf.sarif != "" {
+		if _, err := writeFile(filepath.Dir(rf.sarif), filepath.Base(rf.sarif), func(w io.Writer) error {
+			return report.WriteSARIF(w, ev, version.Version, rf.location)
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
 		}
 	}
-	if *junit != "" {
-		if _, err := writeFile(filepath.Dir(*junit), filepath.Base(*junit), func(w io.Writer) error {
-			return report.WriteJUnit(w, "redfilade test "+*level, []report.Case{{Name: *image, Evidence: ev, WantExploited: false}})
+	if rf.junit != "" {
+		if _, err := writeFile(filepath.Dir(rf.junit), filepath.Base(rf.junit), func(w io.Writer) error {
+			return report.WriteJUnit(w, "redfilade test "+level, []report.Case{{Name: label, Evidence: ev, WantExploited: false}})
 		}); err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
@@ -593,4 +647,452 @@ func splitPositional(args []string) (string, []string) {
 		return a, rest
 	}
 	return "", args
+}
+
+// cmdTestRemote tests an MCP server reached over Streamable HTTP. Only a
+// server on this machine is accepted until domain verification exists.
+func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, protocol string, c common, rf reportFiles,
+	stdin io.Reader, stdout, stderr io.Writer) int {
+	u, err := neturl.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		fmt.Fprintln(stderr, "redfilade: --url must be an http or https URL without credentials in it")
+		return exitError
+	}
+	proof := ""
+	var hc *http.Client
+	if isLoopback(u.Hostname()) {
+		proof = "loopback: a server on this machine"
+	} else {
+		if u.Scheme != "https" {
+			fmt.Fprintln(stderr, "redfilade: remote hosts must be tested over https")
+			return exitError
+		}
+		v, err := domainVerifier()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		records, err := v.Records()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		hc, proof, err = v.RemoteClient(ctx, u.Hostname(), records, domain.RemoteOptions{Lookup: lookupNetIP, Allow: allowAddr, RootCAs: remoteRootCAs})
+		if err != nil {
+			fmt.Fprintf(stderr, "redfilade: %v\nRedfilade only tests remote servers on domains you have proven you control, at public addresses.\n", err)
+			return exitError
+		}
+	}
+	readEnv := func(name string) (string, bool) {
+		if name == "" {
+			return "", true
+		}
+		v := os.Getenv(name)
+		if v == "" {
+			fmt.Fprintf(stderr, "redfilade: environment variable %s is empty or not set\n", name)
+			return "", false
+		}
+		return v, true
+	}
+	token, ok := readEnv(tokenEnv)
+	if !ok {
+		return exitError
+	}
+	foreign, ok := readEnv(foreignEnv)
+	if !ok {
+		return exitError
+	}
+	attacks := run.RemoteAttacks(level)
+	if len(attacks) == 0 {
+		fmt.Fprintf(stderr, "redfilade: level %s has no remote-safe attacks\n", level)
+		return exitError
+	}
+	var ids []string
+	for _, a := range attacks {
+		ids = append(ids, a.ID)
+	}
+	p := consent.RemotePlan{URL: u.String(), Level: level, Attacks: ids, Requests: battery.RemoteRequestBudget(level), Proof: proof, Token: token != ""}
+	if !approve(p, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	ev, err := run.Remote(ctx, run.RemoteOptions{URL: u.String(), Token: token, ForeignToken: foreign, HTTPClient: hc}, protocol, level,
+		run.Options{Deadline: c.timeout, Version: version.Version, Commit: version.Commit})
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	return finishTest(ev, u.Redacted(), level, c, rf, stdout, stderr)
+}
+
+func isLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Seams for tests: how domains are verified and resolved, which addresses are
+// acceptable, and which roots are trusted for TLS (nil = system roots).
+var (
+	domainVerifier = domain.NewVerifier
+	lookupNetIP    func(ctx context.Context, host string) ([]netip.Addr, error)
+	allowAddr      func(netip.Addr) bool
+	remoteRootCAs  *x509.CertPool
+)
+
+func cmdDomain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || (args[0] != "list" && len(args) != 2) {
+		fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+		return exitError
+	}
+	v, err := domainVerifier()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	switch args[0] {
+	case "challenge":
+		r, err := v.Challenge(args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		fmt.Fprintf(stdout, "Prove you control %s by publishing this token in ONE of these places:\n\n", r.Domain)
+		fmt.Fprintf(stdout, "  DNS TXT record   %s%s\n                   value: %s\n                   (covers %s and all its subdomains)\n\n", domain.DNSPrefix, r.Domain, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "  HTTPS file       https://%s%s\n                   body:  %s\n                   (covers %s only)\n\n", r.Domain, domain.WellKnownPath, r.Token, r.Domain)
+		fmt.Fprintf(stdout, "Then run: redfilade domain verify %s\n", r.Domain)
+		return exitPass
+	case "verify":
+		r, err := v.Verify(ctx, args[1])
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitFindings
+		}
+		fmt.Fprintf(stdout, "verified %s with a %s proof. Keep the proof published: it is checked again before every remote test.\n", r.Domain, r.Method)
+		return exitPass
+	case "list":
+		rs, err := v.List()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		for _, r := range rs {
+			state := "pending"
+			if !r.VerifiedAt.IsZero() {
+				state = "verified (" + r.Method + ", " + r.VerifiedAt.Format(time.RFC3339) + ")"
+			}
+			fmt.Fprintf(stdout, "%-40s %s\n", r.Domain, state)
+		}
+		return exitPass
+	}
+	fmt.Fprintln(stderr, "usage: redfilade domain challenge DOMAIN | domain verify DOMAIN | domain list")
+	return exitError
+}
+
+// scenarioPlan is the consent screen for one build of a scenario; agent
+// scenarios also name the model and where its data goes.
+func scenarioPlan(m *scenario.Manifest, build string, tier sandbox.Tier, t *target, c common) consent.Plan {
+	p := consent.FromManifest(m, build, tier, t.origin, t.digest, t.signature)
+	if m.Kind == "agent" {
+		p.Model = c.model
+		trials := m.Agent.Trials
+		if c.trials > 0 {
+			trials = c.trials
+		}
+		p.Trials = trials
+	}
+	return p
+}
+
+// runScenario runs one build, through the agent engine for L3 scenarios.
+func runScenario(ctx context.Context, m *scenario.Manifest, build string, o run.Options, c common) (*report.Evidence, error) {
+	if m.Kind == "client" {
+		return run.Client(ctx, m, build, o)
+	}
+	if m.Kind != "agent" {
+		return run.Scenario(ctx, m, build, o)
+	}
+	if c.trials < 0 || c.trials > 50 {
+		return nil, errors.New("--trials must be 0-50")
+	}
+	model, err := agent.New(c.model)
+	if err != nil {
+		return nil, err
+	}
+	return run.Agent(ctx, m, build, model, c.trials, o)
+}
+
+// cmdHostileServer runs Redfilade's hostile MCP server on stdin and stdout,
+// for testing your own MCP client: add it to the client as a stdio server.
+// Nothing but protocol messages is written to stdout; the session is saved
+// to the log file when the client disconnects.
+func cmdHostileServer(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("hostile-server", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	probes := fs.String("probes", "all", "comma-separated: elicitation, hidden_instruction, sampling, or all")
+	logFile := fs.String("log", "redfilade-hostile-session.jsonl", "where to save the session for client-report")
+	idle := fs.Duration("idle", 10*time.Minute, "end the session after this long without messages")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	list, err := hostile.SortedProbes(strings.Split(*probes, ","))
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	rec := mcp.NewRecorder(mcp.DefaultMaxMessageBytes)
+	fmt.Fprintf(stderr, "redfilade hostile server: probes %s; session log %s\n", strings.Join(list, ", "), *logFile)
+	serr := hostile.Serve(ctx, stdin, stdout, hostile.Options{Probes: list, Recorder: rec, Idle: *idle})
+	session := map[string]any{"schema": "redfilade.hostile-session/v1", "probes": list, "frames": rec.Frames()}
+	if _, err := writeFile(filepath.Dir(*logFile), filepath.Base(*logFile), func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", " ")
+		return enc.Encode(session)
+	}); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if serr != nil {
+		fmt.Fprintln(stderr, "redfilade:", serr)
+		return exitError
+	}
+	return exitPass
+}
+
+// cmdClientReport judges a hostile-server session log.
+func cmdClientReport(args []string, stdout, stderr io.Writer) int {
+	file, rest := splitPositional(args)
+	fs := flag.NewFlagSet("client-report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	sarif := fs.String("sarif", "", "write SARIF 2.1.0 to this file")
+	out := fs.String("out", "redfilade-results", "directory for the evidence file")
+	if err := fs.Parse(rest); err != nil || file == "" {
+		fmt.Fprintln(stderr, "usage: redfilade client-report FILE [--sarif FILE] [--out DIR]")
+		return exitError
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	var session struct {
+		Schema string      `json:"schema"`
+		Probes []string    `json:"probes"`
+		Frames []mcp.Frame `json:"frames"`
+	}
+	if err := json.Unmarshal(b, &session); err != nil || session.Schema != "redfilade.hostile-session/v1" {
+		fmt.Fprintln(stderr, "redfilade: not a hostile-server session log")
+		return exitError
+	}
+	probes, err := hostile.SortedProbes(session.Probes)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	ev := run.ClientReport(session.Frames, probes, version.Version)
+	summary(stdout, "your client [L4]", ev)
+	if _, err := writeFile(*out, "evidence-client-L4.json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if *sarif != "" {
+		if _, err := writeFile(filepath.Dir(*sarif), filepath.Base(*sarif), func(w io.Writer) error {
+			return report.WriteSARIF(w, ev, version.Version, "README.md")
+		}); err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+	}
+	switch ev.Oracle.Verdict {
+	case oracle.Exploited:
+		return exitFindings
+	case oracle.NotExploited:
+		return exitPass
+	}
+	return exitError
+}
+
+// defenceReport is the L5 result file.
+type defenceReport struct {
+	Schema       string           `json:"schema"`
+	Image        string           `json:"image"`
+	Isolation    string           `json:"isolation"`
+	Attacks      []defenceAttack  `json:"attacks"`
+	Benign       []defenceBenign  `json:"benign"`
+	Stopped      int              `json:"stopped"`
+	Judged       int              `json:"judged"` // attack runs that were not inconclusive
+	BlockRate    float64          `json:"block_rate"`
+	BlockCI95    [2]float64       `json:"block_rate_interval_95"`
+	BenignCalls  int              `json:"benign_calls"`
+	FalsePos     int              `json:"false_positives"`
+	FalsePosRate float64          `json:"false_positive_rate"`
+	FalsePosCI95 [2]float64       `json:"false_positive_rate_interval_95"`
+	Errors       []string         `json:"errors,omitempty"`
+	Started      time.Time        `json:"started_at"`
+	Finished     time.Time        `json:"finished_at"`
+	Defence      *defence.Summary `json:"-"`
+}
+
+type defenceAttack struct {
+	Scenario string          `json:"scenario"`
+	Level    string          `json:"level"`
+	Verdict  string          `json:"verdict"`
+	Stopped  bool            `json:"stopped"`
+	Blocked  []defence.Block `json:"blocked"`
+}
+
+type defenceBenign struct {
+	Scenario string          `json:"scenario"`
+	Calls    int             `json:"calls"`
+	Blocked  int             `json:"blocked"`
+	Details  []defence.Block `json:"details"`
+}
+
+// cmdDefend measures a defence (L5): how many built-in attacks it stops on
+// vulnerable twins, and how many benign calls on secure twins it blocks.
+func cmdDefend(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, runner sandbox.Runner) int {
+	fs := flag.NewFlagSet("defend", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var c common
+	addCommon(fs, &c)
+	image := fs.String("defence-image", "", "container image of the defence (speaks redfilade.defence/v1 on stdio)")
+	minBlock := fs.Float64("min-block-rate", -1, "fail (exit 1) if the block rate is lower than this, 0-1")
+	maxFP := fs.Float64("max-false-positive-rate", -1, "fail (exit 1) if the false-positive rate is higher than this, 0-1")
+	if err := fs.Parse(args); err != nil {
+		return exitError
+	}
+	if *image == "" {
+		fmt.Fprintln(stderr, "usage: redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]")
+		return exitError
+	}
+	all, err := scenarios.Builtins()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	var attacks []*scenario.Manifest
+	for _, m := range all {
+		if m.Kind == "attack" || m.Kind == "agent" {
+			attacks = append(attacks, m)
+		}
+	}
+	tasks, err := defence.Benign()
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	o, tier := opts(ctx, runner, c)
+	plan := consent.DefencePlan{Image: *image, Attacks: len(attacks), Benign: len(tasks), Tier: tier, Pull: "missing",
+		ModelNote: "agent scenarios use " + c.model}
+	if !approve(plan, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	empty, err := os.MkdirTemp("", "redfilade-defence-")
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	defer os.RemoveAll(empty)
+	cell, err := runner.Start(ctx, sandbox.Spec{Name: "redfilade-defence-" + run.NewRunID(), Image: *image, WorldDir: empty, Network: "none", Tier: tier, Pull: "missing"})
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade: start defence:", err)
+		return exitError
+	}
+	defer cell.Stop()
+	o.Defence = defence.NewProc(cell.Stdin, cell.Stdout)
+	o.DefenceImage = *image
+
+	rep := defenceReport{Schema: "redfilade.defence-report/v1", Image: *image, Isolation: string(tier), Started: time.Now().UTC(),
+		Attacks: []defenceAttack{}, Benign: []defenceBenign{}}
+	fmt.Fprintf(stdout, "\nAttacks through %s:\n", *image)
+	for _, m := range attacks {
+		ev, err := runScenario(ctx, m, "vulnerable", o, c)
+		if err != nil {
+			rep.Errors = append(rep.Errors, m.ID+": "+err.Error())
+			continue
+		}
+		a := defenceAttack{Scenario: m.ID, Level: m.Level, Verdict: ev.Oracle.Verdict, Blocked: []defence.Block{}}
+		if ev.Defence != nil {
+			a.Blocked = ev.Defence.Blocked
+		}
+		// A run the defence cut short (inconclusive, with messages blocked)
+		// counts as stopped: the attack never got to run. An inconclusive
+		// run with nothing blocked says nothing about the defence.
+		switch {
+		case ev.Oracle.Verdict == oracle.NotExploited,
+			ev.Oracle.Verdict == oracle.Inconclusive && len(a.Blocked) > 0:
+			a.Stopped = true
+			rep.Stopped++
+			rep.Judged++
+		case ev.Oracle.Verdict == oracle.Exploited:
+			rep.Judged++
+		}
+		state := "NOT stopped"
+		switch {
+		case a.Stopped:
+			state = "stopped"
+		case ev.Oracle.Verdict == oracle.Inconclusive:
+			state = "inconclusive"
+		}
+		fmt.Fprintf(stdout, "  %-24s %s  %-12s (%d messages blocked)\n", m.ID, m.Level, state, len(a.Blocked))
+		rep.Attacks = append(rep.Attacks, a)
+	}
+	fmt.Fprintln(stdout, "\nBenign tasks on secure twins:")
+	for _, t := range tasks {
+		base, ok := scenarios.Builtin(t.Scenario)
+		if !ok {
+			rep.Errors = append(rep.Errors, "benign task for unknown scenario "+t.Scenario)
+			continue
+		}
+		m := *base
+		m.Exploit = nil
+		for _, call := range t.Calls {
+			m.Exploit = append(m.Exploit, scenario.Step{Call: call.Tool, Arguments: call.Arguments})
+		}
+		ev, err := run.Scenario(ctx, &m, "secure", o)
+		if err != nil {
+			rep.Errors = append(rep.Errors, t.Scenario+" (benign): "+err.Error())
+			continue
+		}
+		b := defenceBenign{Scenario: t.Scenario, Calls: len(t.Calls), Details: []defence.Block{}}
+		if ev.Defence != nil {
+			b.Details = ev.Defence.Blocked
+			b.Blocked = min(len(ev.Defence.Blocked), len(t.Calls))
+		}
+		rep.BenignCalls += b.Calls
+		rep.FalsePos += b.Blocked
+		fmt.Fprintf(stdout, "  %-24s %d of %d calls blocked\n", t.Scenario, b.Blocked, b.Calls)
+		rep.Benign = append(rep.Benign, b)
+	}
+	if rep.Judged > 0 {
+		rep.BlockRate = float64(rep.Stopped) / float64(rep.Judged)
+	}
+	lo, hi := agent.Wilson(rep.Stopped, rep.Judged)
+	rep.BlockCI95 = [2]float64{lo, hi}
+	if rep.BenignCalls > 0 {
+		rep.FalsePosRate = float64(rep.FalsePos) / float64(rep.BenignCalls)
+	}
+	lo, hi = agent.Wilson(rep.FalsePos, rep.BenignCalls)
+	rep.FalsePosCI95 = [2]float64{lo, hi}
+	rep.Finished = time.Now().UTC()
+	fmt.Fprintf(stdout, "\nBlock rate      %d of %d attacks stopped (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+		rep.Stopped, rep.Judged, rep.BlockRate*100, rep.BlockCI95[0]*100, rep.BlockCI95[1]*100)
+	fmt.Fprintf(stdout, "False positives %d of %d benign calls blocked (%.0f%%, 95%% interval %.0f-%.0f%%)\n",
+		rep.FalsePos, rep.BenignCalls, rep.FalsePosRate*100, rep.FalsePosCI95[0]*100, rep.FalsePosCI95[1]*100)
+	for _, e := range rep.Errors {
+		fmt.Fprintln(stdout, "  note:", report.Clean(e, 300))
+	}
+	if _, err := writeFile(c.out, "defence-report.json", func(w io.Writer) error {
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(rep)
+	}); err != nil {
+		fmt.Fprintln(stderr, "redfilade:", err)
+		return exitError
+	}
+	if (*minBlock >= 0 && rep.BlockRate < *minBlock) || (*maxFP >= 0 && rep.FalsePosRate > *maxFP) || rep.Judged == 0 {
+		return exitFindings
+	}
+	return exitPass
 }
