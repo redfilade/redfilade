@@ -34,6 +34,8 @@ type Plan struct {
 	Origin     string // "built-in" or "external pack"
 	Digest     string // external packs only
 	Signature  string // built-in, verified, unsigned, unverifiable
+	Model      string // L3 agent scenarios: the model that acts
+	Trials     int    // L3 agent scenarios: independent runs
 }
 
 // ErrRefused means the plan is not allowed on this machine at all.
@@ -102,6 +104,15 @@ func (p Plan) Render() string {
 		line("Env vars", "none")
 	} else {
 		line("Env vars", strings.Join(p.EnvNames, ", "))
+	}
+	if p.Model != "" {
+		line("Agent model", p.Model)
+		line("Trials", fmt.Sprintf("%d (a fresh cell for each)", p.Trials))
+		if strings.HasPrefix(p.Model, "anthropic:") {
+			line("Data", "the task, tool list and tool outputs (synthetic data only) are sent to the model API")
+		} else {
+			line("Data", "a scripted stand-in model on this machine; nothing leaves it")
+		}
 	}
 	switch p.Tier {
 	case sandbox.TierGVisor:

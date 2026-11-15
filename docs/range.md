@@ -151,3 +151,17 @@ export OTHER_AUDIENCE_TOKEN=...       # optional: a valid token issued for a dif
 ```
 
 The proof is checked again before every run, so removing it stops testing at once. Redfilade refuses to test a verified name that resolves to a private, loopback or cloud-metadata address, and pins the connection to one public address for the whole run.
+
+## L3: an AI agent in the loop
+
+Agent scenarios give an AI model an ordinary task and the target's tools, while the attack hides in the data it reads. Each trial runs in a fresh cell; the report gives how often the agent was hijacked, with a 95% interval.
+
+```sh
+./redfilade range run l3-inbox-injection --build vulnerable                      # scripted stand-in model
+export ANTHROPIC_API_KEY=...                                                     # for a real model
+./redfilade range run l3-inbox-injection --build secure --model anthropic:claude-sonnet-5-5 --trials 20
+```
+
+- `scripted:naive` follows instructions it finds in tool output, `scripted:careful` never does. They test the range and the twins; they are not real models.
+- With `anthropic:<model-id>`, the task, tool list and tool outputs (synthetic data only) are sent to the model API. `REDFILADE_MODEL_BASE_URL` points requests at a model proxy instead.
+- `agent_leaked_canary` fires only when the server **carried out** a tool call carrying the secret, so a server-side safeguard counts.

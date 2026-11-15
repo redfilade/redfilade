@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/redfilade/redfilade/internal/agent"
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/mcp"
 	"github.com/redfilade/redfilade/internal/oracle"
@@ -379,4 +381,76 @@ func Remote(ctx context.Context, r RemoteOptions, protocol, level string, o Opti
 	}
 	ev.FinishedAt = time.Now().UTC()
 	return ev, nil
+}
+
+// Agent runs an L3 scenario: in each trial, a fresh cell and world, and the
+// model working on the scenario's task with the target's tools. The verdict
+// is exploited if any trial was; the rate and its 95% interval are reported.
+func Agent(ctx context.Context, m *scenario.Manifest, build string, model agent.Model, trials int, o Options) (*report.Evidence, error) {
+	if m.Kind != "agent" || m.Agent == nil {
+		return nil, fmt.Errorf("%s is not an agent scenario", m.ID)
+	}
+	b := m.Builds.Secure
+	if build == "vulnerable" {
+		b = m.Builds.Vulnerable
+	} else if build != "secure" {
+		return nil, fmt.Errorf("unknown build %q", build)
+	}
+	if trials <= 0 {
+		trials = m.Agent.Trials
+	}
+	res := &report.AgentResult{Model: model.Name(), Task: m.Agent.Task, Trials: trials, Transcripts: []json.RawMessage{}}
+	var out *report.Evidence
+	var findings []oracle.Finding
+	for i := 0; i < trials; i++ {
+		w, err := world.Build(m)
+		if err != nil {
+			return nil, err
+		}
+		var tr *agent.Transcript
+		steps := func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ battery.Env) error {
+			var err error
+			tr, err = agent.Run(ctx, model, c, tools, m.Agent.Task, m.Agent.MaxSteps)
+			return err
+		}
+		subject := report.Subject{Mode: "range", ScenarioID: m.ID, Build: build, Image: b.Image, Protocol: m.Protocol, Level: m.Level, Family: m.Family}
+		ev, err := execute(ctx, o, w, subject, b.Cmd, m.Needs.Network, m.Oracle.Checks, m.Oracle.Match, "never", steps)
+		if tr != nil {
+			raw, _ := json.Marshal(tr)
+			res.Transcripts = append(res.Transcripts, json.RawMessage(w.Redact(string(raw))))
+		}
+		w.Close()
+		if err != nil {
+			return nil, err
+		}
+		if ev.Oracle.Verdict != oracle.Inconclusive {
+			res.Completed++
+		}
+		if ev.Oracle.Verdict == oracle.Exploited {
+			res.Exploited++
+			findings = append(findings, ev.Oracle.Findings...)
+		}
+		// Keep the evidence of the first exploited trial, or else the last.
+		if out == nil || (ev.Oracle.Verdict == oracle.Exploited && out.Oracle.Verdict != oracle.Exploited) || out.Oracle.Verdict != oracle.Exploited {
+			out = ev
+		}
+	}
+	if res.Completed > 0 {
+		res.Rate = float64(res.Exploited) / float64(res.Completed)
+	}
+	lo, hi := agent.Wilson(res.Exploited, res.Completed)
+	res.Interval95 = [2]float64{lo, hi}
+	switch {
+	case res.Exploited > 0:
+		out.Oracle.Verdict = oracle.Exploited
+		out.Oracle.Reason = ""
+		out.Oracle.Findings = findings
+	case res.Completed == trials:
+		out.Oracle.Verdict = oracle.NotExploited
+	default:
+		out.Oracle.Verdict = oracle.Inconclusive
+		out.Oracle.Reason = fmt.Sprintf("only %d of %d trials completed", res.Completed, trials)
+	}
+	out.Agent = res
+	return out, nil
 }

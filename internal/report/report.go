@@ -37,9 +37,22 @@ type Evidence struct {
 	WorldChanges []world.Change     `json:"world_changes"`
 	Egress       []oracle.Egress    `json:"egress,omitempty"`
 	HTTP         []mcp.HTTPExchange `json:"http,omitempty"`
+	Agent        *AgentResult       `json:"agent,omitempty"` // L3 runs
 	Frames       []mcp.Frame        `json:"frames"`
 	Errors       []string           `json:"errors,omitempty"`
 	Signature    Signature          `json:"signature"`
+}
+
+// AgentResult summarises an L3 run over several trials.
+type AgentResult struct {
+	Model       string            `json:"model"`
+	Task        string            `json:"task"`
+	Trials      int               `json:"trials"`
+	Completed   int               `json:"completed"` // trials that ran to the end
+	Exploited   int               `json:"exploited"`
+	Rate        float64           `json:"rate"`        // exploited / completed
+	Interval95  [2]float64        `json:"interval_95"` // Wilson score interval
+	Transcripts []json.RawMessage `json:"transcripts"` // redacted, one per trial
 }
 
 // Tool identifies the Redfilade build that produced the evidence.
@@ -205,6 +218,9 @@ var rules = map[string]sarifRule{
 	"tool_metadata_flagged": {ID: "RF-TOOL-POISONING", Name: "PoisonedToolMetadata",
 		ShortDescription: sarifText{"A tool description or parameter carries hidden instructions or hidden behaviour"},
 		Help:             sarifText{"Tool descriptions are read by the AI model. Describe only what the tool does; never include instructions to the model, hidden actions or requests for secrets. Detection rules: Cisco MCP Scanner (Apache-2.0)."}},
+	"agent_leaked_canary": {ID: "RF-AGENT-HIJACK", Name: "AgentHijackedToLeakSecret",
+		ShortDescription: sarifText{"An AI agent was steered by tool data into sending a secret, and the server carried it out"},
+		Help:             sarifText{"Treat content from tools as untrusted data. On the server, require confirmation or an allow-list for actions that send data out (recipients, URLs), and never let tool output alone authorise them."}},
 	"auth_bypassed": {ID: "RF-AUTH-BYPASS", Name: "AuthenticationBypassed",
 		ShortDescription: sarifText{"A request without a valid token for this server was served"},
 		Help:             sarifText{"Require a bearer token on every request, verify its signature and expiry, and reject tokens whose audience is not this server (RFC 8707, MCP authorization). Return 401 with WWW-Authenticate."}},
