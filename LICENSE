@@ -17,6 +17,10 @@ Neither license allows you to sell Redfilade, offer it to others as a hosted or
 managed service, or distribute it inside a commercial product. No other license
 is offered.
 
+Files under internal/rules/cisco/ are third-party material from Cisco MCP
+Scanner and are licensed under the Apache License 2.0 (see the LICENSE file in
+that directory), not under the licenses below.
+
 Use of Redfilade is also subject to DISCLAIMER.md: you may use it only against
 systems you own or are explicitly authorised to test, and you alone are
 responsible for how you use it.

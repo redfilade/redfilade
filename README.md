@@ -89,6 +89,7 @@ Full guide: [`docs/range.md`](docs/range.md).
 | `l2-path-traversal` | L2 | A file tool tricked into reading outside its folder |
 | `l2-ssrf` | L2 | A "fetch a preview" tool tricked into calling a server it should not reach |
 | `l2-secrets-in-output` | L2 | A status tool that dumps its environment, API keys included |
+| `l1-tool-poisoning` | L1 | A tool description that hides instructions to the AI model, detected with Cisco's MCP Scanner rules |
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
 
@@ -119,7 +120,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 
 | Level | Checks | Status |
 |---|---|---|
-| **L1** Conformance and hygiene | Leaky errors, then protocol correctness, schemas, auth, oversized inputs | First attack available |
+| **L1** Conformance and hygiene | Leaky errors, tool poisoning, then protocol correctness, schemas, auth, oversized inputs | Two checks available |
 | **L2** Security battery | Path traversal, SSRF, secrets in output, then injection, token audience, rate limits | Three attacks available |
 | **L3** Agent in the loop | A real model uses the server while attacks arrive through descriptions and outputs | Planned |
 | **L4** Client and host | A client facing hostile servers: hidden text, sampling abuse, approval tricks | Planned |
@@ -138,13 +139,13 @@ Today a cell is a hardened container: no network or a private trap network, read
 .github/            CI (untrusted lane), release (trusted lane), triage lane, CODEOWNERS, rulesets
 assets/brand/       Logo, mascot and social preview
 cmd/redfilade/      CLI (Go)
-internal/           MCP client, scenarios, world, sandbox, consent, oracle, reports, battery, packs, triage
+internal/           MCP client, scenarios, world, sandbox, consent, oracle, detection rules, reports, battery, packs, triage
 infra/sink/         Egress trap: records requests from cells, never forwards them
 scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0017
+docs/adr/           Architecture Decision Records 0001 to 0018
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```
@@ -178,3 +179,5 @@ Redfilade is **source-available** and free. You choose one of two licenses ([`LI
 - **Name and logo:** not licensed. See [`TRADEMARKS.md`](TRADEMARKS.md).
 
 Versions published before this change remain under the Apache License 2.0 they were released with.
+
+**Third-party code.** The detection rules in `internal/rules/cisco/` come from [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner) and remain under the Apache License 2.0 (see the `LICENSE` and `SOURCE.md` files in that directory). Cisco does not endorse Redfilade.

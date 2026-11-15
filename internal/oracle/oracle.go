@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/redfilade/redfilade/internal/mcp"
+	"github.com/redfilade/redfilade/internal/rules"
 	"github.com/redfilade/redfilade/internal/scenario"
 	"github.com/redfilade/redfilade/internal/world"
 )
@@ -174,6 +175,8 @@ func Evaluate(in Input) Result {
 					}
 				}
 			}
+		case "tool_metadata_flagged", "output_injection_flagged":
+			got = ruleFindings(c.Fact, in.Frames, redact, &res)
 		case "internals_leaked":
 			seen := map[string]bool{}
 			for _, s := range strs {
@@ -209,6 +212,89 @@ func Evaluate(in Input) Result {
 		res.Verdict = NotExploited
 	}
 	return res
+}
+
+// RuleScanBudget bounds how much text one evaluation feeds to the detection
+// rules, so a hostile server cannot make the oracle slow by sending a lot.
+const RuleScanBudget = 1 << 20
+
+// outputRules are the rules that make sense for what a tool returns: text
+// aimed at the model, not descriptions of what code does.
+var outputRules = []string{"prompt_injection", "coercive_injection", "script_injection"}
+
+// ruleFindings applies the bundled detection rules to tool metadata
+// (tools/list results) or tool output (tools/call results).
+func ruleFindings(fact string, frames []mcp.Frame, redact func(string) string, res *Result) []Finding {
+	set, err := rules.Cisco()
+	if err != nil {
+		res.NotObserved = append(res.NotObserved, "detection rules failed to load: "+err.Error())
+		return nil
+	}
+	if fact == "output_injection_flagged" {
+		set = set.Only(outputRules...)
+	}
+	budget := RuleScanBudget
+	seen := map[string]bool{}
+	var got []Finding
+	for _, f := range frames {
+		if f.Direction != mcp.DirServerToClient {
+			continue
+		}
+		var msg struct {
+			Result struct {
+				Tools   []map[string]any `json:"tools"`
+				Content []any            `json:"content"`
+			} `json:"result"`
+		}
+		if json.Unmarshal(f.Raw, &msg) != nil {
+			continue
+		}
+		type field struct{ where, text string }
+		var fields []field
+		if fact == "tool_metadata_flagged" {
+			for _, t := range msg.Result.Tools {
+				name, _ := t["name"].(string)
+				if d, ok := t["description"].(string); ok {
+					fields = append(fields, field{"tool " + name + " description", d})
+				}
+				var params []string
+				walk(t["inputSchema"], &params, 0)
+				if len(params) > 0 {
+					fields = append(fields, field{"tool " + name + " parameters", strings.Join(params, "\n")})
+				}
+			}
+		} else {
+			var parts []string
+			walk(msg.Result.Content, &parts, 0)
+			if len(parts) > 0 {
+				fields = append(fields, field{"tool output", strings.Join(parts, "\n")})
+			}
+		}
+		for _, fl := range fields {
+			text := fl.text
+			if len(text) > budget {
+				text = text[:budget]
+			}
+			budget -= len(text)
+			for _, h := range set.Match(text) {
+				key := h.Rule + "|" + fl.where
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+				x := redact(text)
+				if h.Start >= 0 && h.End <= len(text) {
+					x = excerpt(redact(text), redact(text[h.Start:h.End]))
+				}
+				got = append(got, Finding{Fact: fact, Detector: "cisco:" + h.Rule, Path: fl.where, FrameSeq: f.Seq, Excerpt: x})
+			}
+			if budget <= 0 {
+				res.NotObserved = append(res.NotObserved, "detection rules stopped after 1 MiB of server text in this run")
+				return got
+			}
+		}
+	}
+	return got
 }
 
 type located struct {

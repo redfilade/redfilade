@@ -94,7 +94,9 @@ A scenario is a directory under `scenarios/` with a `scenario.json` (ADR-0013). 
 
 - **Canaries** (`{{canary.NAME}}`) get a fresh random value every run, so a leak cannot be faked by guessing.
 - **Exploit steps** are MCP tool calls written as data, or a built-in battery attack.
-- **Oracle facts** available today: `canary_leaked` (a canary crossed from the target to the client), `internals_leaked` (stack traces, source paths, connection strings), `world_file_changed`, `secret_pattern_leaked` (well-known credential formats), `sensitive_file_read` (system file contents in replies), `egress_reached_sink` and `canary_egressed` (with `"needs": {"network": "sink"}`).
+- **Oracle facts** available today: `canary_leaked` (a canary crossed from the target to the client), `internals_leaked` (stack traces, source paths, connection strings), `world_file_changed`, `secret_pattern_leaked` (well-known credential formats), `sensitive_file_read` (system file contents in replies), `egress_reached_sink` and `canary_egressed` (with `"needs": {"network": "sink"}`), `tool_metadata_flagged` (a tool description or parameter matches a detection rule) and `output_injection_flagged` (tool output carries prompt-injection, coercion or hidden-script text).
+
+The last two use the detection rules from [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner) (Apache-2.0), bundled unmodified in `internal/rules/cisco` and evaluated by Redfilade's own RE2 engine, which is tested to give exactly the same results as the reference YARA engine.
 
 Targets live in `targets/<name>/` as a Go program built twice with `-X main.mode=vulnerable|secure`, into `FROM scratch` images by `scripts/build-targets.sh`.
 
