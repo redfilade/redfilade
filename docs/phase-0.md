@@ -29,7 +29,7 @@ Wait until the `ci` workflow has run once on `main`, so the status checks exist.
 | File | What it enforces |
 |---|---|
 | `main-integrity.json` | No deletion or force push, linear history, signed commits, pull requests only, all four CI checks green. **Nobody can bypass it.** |
-| `main-review.json` | One approving review from a code owner, re-approval after new pushes. Org owners may merge their *own* pull requests without a second reviewer, but still only through a pull request that passes every check above. Remove the bypass when a second maintainer joins. |
+| `main-review.json` | One approving review from a code owner, re-approval after new pushes. **Imported disabled while there is one maintainer:** GitHub combines the pull-request rules of both `main` rulesets, so the owner bypass here cannot override the no-bypass integrity ruleset and every pull request would stay blocked. `main-integrity` still forces pull requests, signed commits and green checks. Set it to **Active** when a second maintainer joins. |
 | `release-tags.json` | Only org owners can create `v*` tags; tags can never be moved or deleted. |
 
 ### B. Create the protected release environment
