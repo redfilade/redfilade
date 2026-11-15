@@ -1,0 +1,101 @@
+# Redfilade GitHub Action: run Redfilade's battery against your MCP server image.
+#
+# Usage (pin to a full commit SHA, never a tag):
+#
+#   - uses: redfilade/redfilade@<commit-sha>
+#     with:
+#       image: ghcr.io/you/your-mcp-server:pr-${{ github.event.number }}
+#       level: L1
+#
+# The server runs in a hardened container cell: no network, read-only root,
+# no capabilities, non-root, nothing from your repository or runner mounted.
+# The action needs only `contents: read`. To see results in code scanning,
+# upload the SARIF file with github/codeql-action/upload-sarif in a job that
+# grants `security-events: write`.
+name: Redfilade MCP security test
+description: Attack your MCP server in an isolated cell and report what leaked, as SARIF.
+author: Redfilade
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  image:
+    description: Container image of the MCP server under test (built earlier in the job, or pullable)
+    required: true
+  server:
+    description: Command to start the server inside the image, if the image has no entrypoint
+    required: false
+    default: ""
+  level:
+    description: Test level (L1 available today)
+    required: false
+    default: L1
+  protocol:
+    description: MCP protocol revision, 2026-07-28 or 2025-11-25
+    required: false
+    default: "2026-07-28"
+  sarif:
+    description: Path to write SARIF 2.1.0 results
+    required: false
+    default: redfilade.sarif
+  location:
+    description: Repository path SARIF results are attached to
+    required: false
+    default: README.md
+  fail-on-findings:
+    description: Fail the step when the attack succeeds
+    required: false
+    default: "true"
+
+outputs:
+  verdict:
+    description: exploited, not_exploited or inconclusive
+    value: ${{ steps.run.outputs.verdict }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      with:
+        go-version: "1.27.x"
+        cache: false
+    - name: Build Redfilade from this pinned commit
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        GOFLAGS: -mod=readonly
+        CGO_ENABLED: "0"
+      run: go build -trimpath -o "$RUNNER_TEMP/redfilade" ./cmd/redfilade
+    - name: Run the battery
+      id: run
+      shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        SERVER: ${{ inputs.server }}
+        LEVEL: ${{ inputs.level }}
+        PROTOCOL: ${{ inputs.protocol }}
+        SARIF: ${{ inputs.sarif }}
+        LOCATION: ${{ inputs.location }}
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        set +e
+        "$RUNNER_TEMP/redfilade" test --image "$IMAGE" --server "$SERVER" --level "$LEVEL" \
+          --protocol "$PROTOCOL" --yes --sarif "$SARIF" --location "$LOCATION" \
+          --out "$RUNNER_TEMP/redfilade-results"
+        code=$?
+        set -e
+        case "$code" in
+          0) verdict=not_exploited ;;
+          1) verdict=exploited ;;
+          *) verdict=inconclusive ;;
+        esac
+        echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+        if [ "$code" = 1 ] && [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          echo "::error::Redfilade: the attack succeeded against $IMAGE (see $SARIF)"
+          exit 1
+        fi
+        if [ "$code" -ge 2 ]; then
+          echo "::error::Redfilade: the run did not complete (exit $code)"
+          exit "$code"
+        fi

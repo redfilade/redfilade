@@ -29,3 +29,10 @@
 /SECURITY.md               @sankettheinventor
 /docs/adr/                 @sankettheinventor
 /docs/threat-model/        @sankettheinventor
+
+# Range engine, targets and the action builders run in their CI
+/internal/                 @sankettheinventor
+/targets/                  @sankettheinventor
+/scenarios/                @sankettheinventor
+/scripts/                  @sankettheinventor
+/action.yml                @sankettheinventor
