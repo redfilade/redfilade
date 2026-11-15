@@ -154,7 +154,7 @@ Today a cell is a hardened container: no network or a private trap network, read
 - [ ] **Phase 0: Foundation.** Hardened organisation, pinned least-privilege CI, secret scanning, dependency policy, threat model, multi-tenant schema, a proven signed dry-run release. Code done; maintainer setup steps in [`docs/phase-0.md`](docs/phase-0.md).
 - [ ] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. Built; the signed proof runs with the first release dry run. [`docs/phase-1.md`](docs/phase-1.md)
 - [ ] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. Built; pack signing runs with the release dry run. [`docs/phase-2.md`](docs/phase-2.md)
-- [ ] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks (done), domain verification and remote targets (done), L3 agent-in-the-loop (first scenario done), and the hosted service. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
+- [x] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and the hosted service for remote tests ([`docs/bench.md`](docs/bench.md)). OAuth sign-in and hosted Range cells follow. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
 - [ ] **Phase 4: Clients and defences.** L4 hostile servers that test MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set.
 
 ## Repository layout
@@ -163,13 +163,14 @@ Today a cell is a hardened container: no network or a private trap network, read
 .github/            CI (untrusted lane), release (trusted lane), triage lane, CODEOWNERS, rulesets
 assets/brand/       Banner, logo, mascot and social preview
 cmd/redfilade/      CLI (Go)
+cmd/redfilade-bench/ Hosted Test Bench service (Go)
 internal/           MCP client, scenarios, world, sandbox, consent, oracle, detection rules, reports, battery, packs, triage
 infra/sink/         Egress trap: records requests from cells, never forwards them
 scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
-docs/adr/           Architecture Decision Records 0001 to 0018
+docs/adr/           Architecture Decision Records 0001 to 0022
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
 ```

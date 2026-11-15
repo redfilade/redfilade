@@ -13,6 +13,8 @@ package domain
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base32"
 	"encoding/json"
 	"errors"
@@ -157,11 +159,11 @@ func (v *Verifier) Challenge(d string) (*Record, error) {
 	if r, ok := m[d]; ok {
 		return r, nil
 	}
-	b := make([]byte, 20)
-	if _, err := rand.Read(b); err != nil {
+	tok, err := NewToken()
+	if err != nil {
 		return nil, err
 	}
-	r := &Record{Domain: d, Token: TokenPrefix + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)), CreatedAt: time.Now().UTC()}
+	r := &Record{Domain: d, Token: tok, CreatedAt: time.Now().UTC()}
 	m[d] = r
 	return r, v.save(m)
 }
@@ -210,15 +212,35 @@ func (v *Verifier) check(ctx context.Context, d, token string) (string, error) {
 	return "", fmt.Errorf("%w: %s: no TXT record %q at %s%s and no matching %s", ErrNotVerified, d, token, DNSPrefix, d, "https://"+d+WellKnownPath)
 }
 
+// CheckProof returns the method whose proof for d is currently published.
+func (v *Verifier) CheckProof(ctx context.Context, d, token string) (string, error) {
+	return v.check(ctx, d, token)
+}
+
+// NewToken returns a fresh challenge token.
+func NewToken() (string, error) {
+	b := make([]byte, 20)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return TokenPrefix + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)), nil
+}
+
 // Authorize returns the verified record that covers host, after checking
 // live that its proof is still published. DNS proofs cover subdomains;
 // HTTPS proofs cover only their exact host.
 func (v *Verifier) Authorize(ctx context.Context, host string) (*Record, error) {
-	host, err := Normalize(host)
+	m, err := v.load()
 	if err != nil {
 		return nil, err
 	}
-	m, err := v.load()
+	return v.AuthorizeRecords(ctx, host, m)
+}
+
+// AuthorizeRecords is Authorize over records held elsewhere (the hosted
+// service keeps them per organisation in its database).
+func (v *Verifier) AuthorizeRecords(ctx context.Context, host string, m map[string]*Record) (*Record, error) {
+	host, err := Normalize(host)
 	if err != nil {
 		return nil, err
 	}
@@ -314,3 +336,38 @@ func PinnedDialer(ctx context.Context, host string, lookup func(ctx context.Cont
 		return d.DialContext(ctx, network, net.JoinHostPort(pinned.String(), port))
 	}, pinned, nil
 }
+
+// RemoteOptions configure RemoteClient. Zero values mean the strict defaults.
+type RemoteOptions struct {
+	Lookup  func(ctx context.Context, host string) ([]netip.Addr, error) // nil: system resolver
+	Allow   func(netip.Addr) bool                                        // nil: PublicAddr
+	RootCAs *x509.CertPool                                               // nil: system roots
+}
+
+// RemoteClient checks that host is covered by one of records (with a live
+// proof re-check), resolves it to public addresses only, and returns an HTTPS
+// client pinned to one of them, with a sentence explaining why the host may
+// be tested.
+func (v *Verifier) RemoteClient(ctx context.Context, host string, records map[string]*Record, o RemoteOptions) (*http.Client, string, error) {
+	hc, proof, _, err := v.RemoteClientPinned(ctx, host, records, o)
+	return hc, proof, err
+}
+
+// RemoteClientPinned is RemoteClient that also returns the pinned address.
+func (v *Verifier) RemoteClientPinned(ctx context.Context, host string, records map[string]*Record, o RemoteOptions) (*http.Client, string, netip.Addr, error) {
+	rec, err := v.AuthorizeRecords(ctx, host, records)
+	if err != nil {
+		return nil, "", netip.Addr{}, err
+	}
+	dial, pinned, err := PinnedDialer(ctx, host, o.Lookup, o.Allow)
+	if err != nil {
+		return nil, "", netip.Addr{}, err
+	}
+	tr := &http.Transport{DialContext: dial, Proxy: nil, ForceAttemptHTTP2: true, TLSHandshakeTimeout: 10 * time.Second,
+		MaxIdleConnsPerHost: 8, TLSClientConfig: &tls.Config{RootCAs: o.RootCAs, MinVersion: tls.VersionTLS12}}
+	proof := fmt.Sprintf("verified domain %s (%s proof, re-checked just now), connecting only to %s", rec.Domain, rec.Method, pinned)
+	return &http.Client{Transport: tr}, proof, pinned, nil
+}
+
+// Records returns the local store as a map for AuthorizeRecords.
+func (v *Verifier) Records() (map[string]*Record, error) { return v.load() }

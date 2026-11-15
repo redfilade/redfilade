@@ -69,6 +69,9 @@ jobs:
       - name: Go vet, build and test (module graph is read-only)
         env:
           GOFLAGS: -mod=readonly
+          # The runner image ships PostgreSQL; database tests start a throwaway
+          # cluster and must run here rather than skip.
+          REDFILADE_REQUIRE_PG: "1"
         run: |
           test -z "$(gofmt -l .)" || { gofmt -l .; echo "Run gofmt"; exit 1; }
           go vet ./...

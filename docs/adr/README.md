@@ -27,3 +27,4 @@ To propose a change, copy [`template.md`](template.md) to the next number and op
 | [0019](0019-http-transport-and-remote-testing.md) | Streamable HTTP transport and testing servers by URL | Accepted |
 | [0020](0020-domain-proofs-and-address-pinning.md) | Domain proofs, live re-checks and address pinning for remote tests | Accepted |
 | [0021](0021-l3-agent-in-the-loop.md) | L3 agent-in-the-loop scenarios | Accepted |
+| [0022](0022-hosted-test-bench-mvp.md) | Hosted Test Bench, first version | Accepted |

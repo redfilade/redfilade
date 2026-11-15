@@ -17,7 +17,6 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"flag"
@@ -657,20 +656,16 @@ func cmdTestRemote(ctx context.Context, rawURL, tokenEnv, foreignEnv, level, pro
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
 		}
-		rec, err := v.Authorize(ctx, u.Hostname())
-		if err != nil {
-			fmt.Fprintf(stderr, "redfilade: %v\nRedfilade only tests remote servers on domains you have proven you control.\n", err)
-			return exitError
-		}
-		dial, pinned, err := domain.PinnedDialer(ctx, u.Hostname(), lookupNetIP, allowAddr)
+		records, err := v.Records()
 		if err != nil {
 			fmt.Fprintln(stderr, "redfilade:", err)
 			return exitError
 		}
-		tr := &http.Transport{DialContext: dial, Proxy: nil, TLSClientConfig: &tls.Config{RootCAs: remoteRootCAs, MinVersion: tls.VersionTLS12},
-			ForceAttemptHTTP2: true, TLSHandshakeTimeout: 10 * time.Second, MaxIdleConnsPerHost: 8}
-		hc = &http.Client{Transport: tr}
-		proof = fmt.Sprintf("verified domain %s (%s proof, re-checked just now), connecting only to %s", rec.Domain, rec.Method, pinned)
+		hc, proof, err = v.RemoteClient(ctx, u.Hostname(), records, domain.RemoteOptions{Lookup: lookupNetIP, Allow: allowAddr, RootCAs: remoteRootCAs})
+		if err != nil {
+			fmt.Fprintf(stderr, "redfilade: %v\nRedfilade only tests remote servers on domains you have proven you control, at public addresses.\n", err)
+			return exitError
+		}
 	}
 	readEnv := func(name string) (string, bool) {
 		if name == "" {
