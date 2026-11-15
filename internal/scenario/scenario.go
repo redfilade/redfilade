@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -66,6 +67,8 @@ type Manifest struct {
 
 	// Dir is where the manifest was loaded from (not part of the JSON).
 	Dir string `json:"-"`
+	// Raw holds the exact manifest bytes, used for the pack digest.
+	Raw []byte `json:"-"`
 }
 
 // Builds holds the vulnerable and secure twins.
@@ -121,10 +124,18 @@ type Check struct {
 
 // Facts the oracle can observe.
 var Facts = map[string]bool{
-	"canary_leaked":      true, // a canary value crossed from the target to the client
-	"world_file_changed": true, // a world file's content changed during the run
-	"internals_leaked":   true, // stack traces, source paths or runtime internals in replies
+	"canary_leaked":         true, // a canary value crossed from the target to the client
+	"world_file_changed":    true, // a world file's content changed during the run
+	"internals_leaked":      true, // stack traces, source paths or runtime internals in replies
+	"secret_pattern_leaked": true, // well-known credential formats in replies
+	"sensitive_file_read":   true, // contents of system files (passwd, private keys, environ) in replies
+	"egress_reached_sink":   true, // the target made a network request (needs network "sink")
+	"canary_egressed":       true, // a canary was sent out to the sink (exfiltration)
 }
+
+// SinkCanary is planted automatically in every scenario that uses the sink;
+// the sink includes it in every response.
+const SinkCanary = "SINK"
 
 // Load reads and validates dir/scenario.json.
 func Load(dir string) (*Manifest, error) {
@@ -165,7 +176,28 @@ func Parse(r io.Reader) (*Manifest, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
+	m.Raw = b
 	return &m, nil
+}
+
+// LoadFS reads and validates dir/scenario.json from an fs.FS (used for the
+// scenarios built into the binary).
+func LoadFS(fsys fs.FS, dir string) (*Manifest, error) {
+	f, err := fsys.Open(path.Join(dir, FileName))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	m, err := Parse(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path.Join(dir, FileName), err)
+	}
+	return m, nil
+}
+
+// PinnedImages reports whether both builds reference images by digest.
+func (m *Manifest) PinnedImages() bool {
+	return strings.Contains(m.Builds.Vulnerable.Image, "@sha256:") && strings.Contains(m.Builds.Secure.Image, "@sha256:")
 }
 
 // Validate checks every field against the format's bounds.
@@ -302,9 +334,13 @@ func (m *Manifest) Validate() error {
 			continue
 		}
 		switch c.Fact {
-		case "canary_leaked":
+		case "canary_leaked", "canary_egressed":
 			if !canaries[c.Canary] {
 				bad("oracle check %d: canary %q is not planted in the world or env", i+1, c.Canary)
+			}
+		case "egress_reached_sink":
+			if m.Needs.Network != "sink" {
+				bad("oracle check %d: egress_reached_sink needs needs.network \"sink\"", i+1)
 			}
 		case "world_file_changed":
 			if !seen[c.Path] {
@@ -360,6 +396,9 @@ func (m *Manifest) Canaries() map[string]bool {
 	}
 	for _, e := range m.Needs.Env {
 		add(e.Value)
+	}
+	if m.Needs.Network == "sink" {
+		out[SinkCanary] = true
 	}
 	return out
 }

@@ -31,20 +31,23 @@ type Plan struct {
 	WorldFiles []string
 	EnvNames   []string
 	Tier       sandbox.Tier
-	Signed     bool
+	Origin     string // "built-in" or "external pack"
+	Digest     string // external packs only
+	Signature  string // built-in, verified, unsigned, unverifiable
 }
 
 // ErrRefused means the plan is not allowed on this machine at all.
 var ErrRefused = errors.New("refused")
 
-// FromManifest builds a plan for one build of a scenario.
-func FromManifest(m *scenario.Manifest, build string, tier sandbox.Tier, signed bool) Plan {
+// FromManifest builds a plan for one build of a scenario. origin is
+// "built-in" or "external pack"; for packs, digest and signature describe it.
+func FromManifest(m *scenario.Manifest, build string, tier sandbox.Tier, origin, digest, signature string) Plan {
 	b := m.Builds.Secure
 	if build == "vulnerable" {
 		b = m.Builds.Vulnerable
 	}
 	p := Plan{ScenarioID: m.ID, Kind: m.Kind, Level: m.Level, Family: m.Family, Risk: m.Risk,
-		Build: build, Image: b.Image, Network: m.Needs.Network, Tier: tier, Signed: signed}
+		Build: build, Image: b.Image, Network: m.Needs.Network, Tier: tier, Origin: origin, Digest: digest, Signature: signature}
 	for _, f := range m.World {
 		p.WorldFiles = append(p.WorldFiles, f.Path)
 	}
@@ -77,6 +80,14 @@ func (p Plan) Render() string {
 	line("Scenario", fmt.Sprintf("%s (%s, %s, family %s)", p.ScenarioID, p.Kind, p.Level, p.Family))
 	line("Build", p.Build)
 	line("Image", p.Image)
+	switch p.Origin {
+	case "built-in":
+		line("Source", "built into this Redfilade binary")
+	case "external pack":
+		line("Source", "EXTERNAL PACK "+p.Digest)
+	default:
+		line("Source", "your image (builder test)")
+	}
 	net := "none (no network at all)"
 	if p.Network == "sink" {
 		net = "internal sink only (no internet)"
@@ -105,10 +116,15 @@ func (p Plan) Render() string {
 		risk = "ESCAPE-CLASS: tries to break out of isolation"
 	}
 	line("Risk", risk)
-	if p.Signed {
-		line("Signature", "verified")
-	} else {
-		line("Signature", "UNSIGNED")
+	switch p.Signature {
+	case "built-in":
+		line("Signature", "covered by this binary's release signature")
+	case "verified":
+		line("Signature", "verified (Redfilade release workflow)")
+	case "":
+		line("Signature", "not applicable")
+	default:
+		line("Signature", strings.ToUpper(p.Signature))
 	}
 	b.WriteString("\n  The cell gets no home folder, no SSH or cloud keys, no Docker socket\n  and none of your environment variables.\n")
 	return b.String()

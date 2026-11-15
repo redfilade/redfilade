@@ -130,3 +130,54 @@ func TestHostileOutputIsLinearTime(t *testing.T) {
 	r := Evaluate(Input{Frames: []mcp.Frame{frame(1, mcp.DirServerToClient, errorReply(big))}, Checks: []scenario.Check{{Fact: "internals_leaked"}}, Completed: true})
 	_ = r
 }
+
+func TestEgressFacts(t *testing.T) {
+	sinkCanary := "CANARY_SINK_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	exfil := "CANARY_KEY_ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	in := Input{
+		Egress:    []Egress{{Method: "GET", Host: "sink.redfilade.test:8080", Path: "/x", Query: "k=" + exfil}},
+		Canaries:  map[string]string{"SINK": sinkCanary, "KEY": exfil},
+		Checks:    []scenario.Check{{Fact: "egress_reached_sink"}, {Fact: "canary_egressed", Canary: "KEY"}},
+		Match:     "all",
+		Completed: true,
+		Network:   "sink",
+	}
+	r := Evaluate(in)
+	if r.Verdict != Exploited {
+		t.Fatalf("verdict = %s", r.Verdict)
+	}
+	for _, f := range r.Findings {
+		if strings.Contains(f.Excerpt, exfil) {
+			t.Errorf("egress excerpt leaks the canary: %q", f.Excerpt)
+		}
+	}
+	in.Egress = nil
+	if r := Evaluate(in); r.Verdict != NotExploited {
+		t.Fatalf("no egress: verdict = %s", r.Verdict)
+	}
+}
+
+func TestSecretAndFileDetectors(t *testing.T) {
+	for name, tc := range map[string]struct {
+		text string
+		fact string
+		want bool
+	}{
+		"aws key":        {"key=AKIAIOSFODNN7EXAMPLE", "secret_pattern_leaked", true},
+		"github token":   {"ghp_" + strings.Repeat("a", 36), "secret_pattern_leaked", true},
+		"private key":    {"-----BEGIN OPENSSH PRIVATE KEY-----\nabc", "secret_pattern_leaked", true},
+		"canary format":  {"token CANARY_ENV_ABCDEFGHIJKLMNOPQRSTUVWXYZ", "secret_pattern_leaked", true},
+		"generic error":  {"Invalid token. Please sign in again.", "secret_pattern_leaked", false},
+		"passwd":         {"root:x:0:0:root:/root:/bin/sh\ndaemon:x:1:1", "sensitive_file_read", true},
+		"passwd mention": {"cannot open /etc/passwd", "sensitive_file_read", false},
+		"environ":        {"PATH=/usr/bin:/bin\x00HOME=/root\x00", "sensitive_file_read", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := Evaluate(Input{Frames: []mcp.Frame{frame(2, mcp.DirServerToClient, errorReply(tc.text))},
+				Checks: []scenario.Check{{Fact: tc.fact}}, Completed: true})
+			if got := r.Verdict == Exploited; got != tc.want {
+				t.Fatalf("exploited = %v, want %v (%+v)", got, tc.want, r.Findings)
+			}
+		})
+	}
+}

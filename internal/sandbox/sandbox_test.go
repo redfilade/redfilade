@@ -52,6 +52,7 @@ func TestRejectsDangerousSpecs(t *testing.T) {
 		"host network":   {Name: "n", Image: "x/y", Network: "host"},
 		"bridge network": {Name: "n", Image: "x/y", Network: "bridge"},
 		"share netns":    {Name: "n", Image: "x/y", Network: "container:other"},
+		"other network":  {Name: "n", Image: "x/y", Network: "my-company-vpn"},
 		"image flag":     {Name: "n", Image: "--privileged"},
 		"name flag":      {Name: "-v", Image: "x/y"},
 		"mount inject":   {Name: "n", Image: "x/y", WorldDir: "/tmp/w,dst=/etc"},
@@ -73,5 +74,12 @@ func TestImageGoesAfterDoubleDash(t *testing.T) {
 	}
 	if a[i+1] != "x/y" || a[i+2] != "--privileged" {
 		t.Fatalf("cmd must follow the image after --: %v", a)
+	}
+}
+
+func TestRunNetworkAllowed(t *testing.T) {
+	a, err := Args(Spec{Name: "n", Image: "x/y", Network: "redfilade-net-0123456789abcdef"})
+	if err != nil || !has(a, "--network", "redfilade-net-0123456789abcdef") {
+		t.Fatalf("per-run internal network rejected: %v %v", err, a)
 	}
 }

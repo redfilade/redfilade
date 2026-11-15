@@ -39,9 +39,19 @@ type Result struct {
 	Reason      string    `json:"reason,omitempty"`
 }
 
+// Egress is one request recorded by the egress sink.
+type Egress struct {
+	Method string `json:"method"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
+	Query  string `json:"query"`
+	Body   string `json:"body"`
+}
+
 // Input is everything the oracle may look at.
 type Input struct {
 	Frames    []mcp.Frame
+	Egress    []Egress
 	Changes   []world.Change
 	Canaries  map[string]string // name -> value
 	Checks    []scenario.Check
@@ -69,6 +79,24 @@ var detectors = []detector{
 	{"connection-string", regexp.MustCompile(`(?i)\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|amqp)://[^\s"'<>]{3,}`)},
 }
 
+// secretDetectors find well-known credential formats in replies. Patterns are
+// specific on purpose: a generic "password=" rule would flag secure servers.
+var secretDetectors = []detector{
+	{"redfilade-canary", regexp.MustCompile(`CANARY_[A-Z0-9_]+_[A-Z2-7]{26}`)},
+	{"aws-access-key", regexp.MustCompile(`\b(?:AKIA|ASIA)[0-9A-Z]{16}\b`)},
+	{"github-token", regexp.MustCompile(`\bgh[pousr]_[A-Za-z0-9]{36,}\b`)},
+	{"slack-token", regexp.MustCompile(`\bxox[abprs]-[A-Za-z0-9-]{10,}`)},
+	{"private-key", regexp.MustCompile(`-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`)},
+	{"jwt", regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`)},
+}
+
+// fileDetectors find the contents of sensitive system files in replies.
+var fileDetectors = []detector{
+	{"etc-passwd", regexp.MustCompile(`(?m)^root:[^:\n]*:0:0:`)},
+	{"private-key-file", regexp.MustCompile(`-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----`)},
+	{"process-environ", regexp.MustCompile(`PATH=/[^\s\x00]*\x00|HOSTNAME=[^\s\x00]+\x00`)},
+}
+
 // NotObservable lists what this runner cannot see; reports always show it.
 func NotObservable(network string) []string {
 	out := []string{
@@ -77,6 +105,8 @@ func NotObservable(network string) []string {
 	}
 	if network == "none" || network == "" {
 		out = append(out, "network attempts (the cell has no network, so none could succeed)")
+	} else {
+		out = append(out, "network traffic to destinations other than the egress sink (the internal network has no route out)")
 	}
 	return out
 }
@@ -112,6 +142,36 @@ func Evaluate(in Input) Result {
 			for _, ch := range in.Changes {
 				if ch.Path == c.Path && ch.Change != "created" {
 					got = append(got, Finding{Fact: c.Fact, Path: ch.Path, Excerpt: ch.Change})
+				}
+			}
+		case "egress_reached_sink":
+			for _, e := range in.Egress {
+				got = append(got, Finding{Fact: c.Fact, Excerpt: redact(e.Method + " " + e.Host + e.Path + query(e.Query))})
+				break
+			}
+		case "canary_egressed":
+			v := in.Canaries[c.Canary]
+			for _, e := range in.Egress {
+				if v != "" && strings.Contains(e.Host+e.Path+"?"+e.Query+"\n"+e.Body, v) {
+					got = append(got, Finding{Fact: c.Fact, Canary: c.Canary, Excerpt: redact(e.Method + " " + e.Host + e.Path + query(e.Query))})
+					break
+				}
+			}
+		case "secret_pattern_leaked", "sensitive_file_read":
+			set := secretDetectors
+			if c.Fact == "sensitive_file_read" {
+				set = fileDetectors
+			}
+			seen := map[string]bool{}
+			for _, s := range strs {
+				for _, d := range set {
+					if seen[d.name] {
+						continue
+					}
+					if loc := d.re.FindStringIndex(s.text); loc != nil {
+						seen[d.name] = true
+						got = append(got, Finding{Fact: c.Fact, Detector: d.name, FrameSeq: s.seq, Excerpt: excerpt(redact(s.text), redact(s.text[loc[0]:loc[1]]))})
+					}
 				}
 			}
 		case "internals_leaked":
@@ -205,6 +265,13 @@ func walk(v any, out *[]string, depth int) {
 			walk(t[k], out, depth+1)
 		}
 	}
+}
+
+func query(q string) string {
+	if q == "" {
+		return ""
+	}
+	return "?" + q
 }
 
 // excerpt returns up to ~160 characters around needle.

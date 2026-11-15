@@ -1,0 +1,30 @@
+{
+  "schema": "redfilade.scenario/v1",
+  "id": "l2-secrets-in-output",
+  "title": "Status tool dumps the environment, including the API token",
+  "summary": "A health-check tool includes the process configuration in its output, which exposes the API token from the environment. The secure twin reports only health and version.",
+  "family": "08",
+  "level": "L2",
+  "protocol": "2026-07-28",
+  "risk": "low",
+  "kind": "attack",
+  "builds": {
+    "vulnerable": { "image": "redfilade-target/secrets-in-output:vulnerable" },
+    "secure": { "image": "redfilade-target/secrets-in-output:secure" }
+  },
+  "needs": {
+    "network": "none",
+    "env": [ { "name": "API_TOKEN", "value": "{{canary.API_TOKEN}}" } ]
+  },
+  "exploit": [
+    { "call": "get_status", "arguments": { "verbose": true } },
+    { "battery": "l2-secrets-in-output" }
+  ],
+  "oracle": {
+    "match": "any",
+    "checks": [
+      { "fact": "canary_leaked", "canary": "API_TOKEN" },
+      { "fact": "secret_pattern_leaked" }
+    ]
+  }
+}

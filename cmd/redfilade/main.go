@@ -1,9 +1,11 @@
 // Command redfilade is the Redfilade CLI.
 //
 //	redfilade version
+//	redfilade scenario list
 //	redfilade scenario validate [DIR...]
-//	redfilade range run DIR --build vulnerable|secure [--yes] [--out DIR]
-//	redfilade range gate [DIR...] [--yes] [--out DIR] [--junit FILE]
+//	redfilade pack digest DIR | pack verify DIR
+//	redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
+//	redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
 //	redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes] [--sarif FILE] [--junit FILE] [--out DIR]
 //
 // Exit codes: 0 pass, 1 findings or gate failure, 2 usage error, refusal or
@@ -11,6 +13,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -19,18 +22,19 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/redfilade/redfilade/internal/battery"
 	"github.com/redfilade/redfilade/internal/consent"
 	"github.com/redfilade/redfilade/internal/oracle"
+	"github.com/redfilade/redfilade/internal/pack"
 	"github.com/redfilade/redfilade/internal/report"
 	"github.com/redfilade/redfilade/internal/run"
 	"github.com/redfilade/redfilade/internal/sandbox"
 	"github.com/redfilade/redfilade/internal/scenario"
 	"github.com/redfilade/redfilade/internal/version"
+	"github.com/redfilade/redfilade/scenarios"
 )
 
 const (
@@ -56,11 +60,20 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 		fmt.Fprintf(stdout, "redfilade %s (%s)\n", version.Version, version.Commit)
 		return exitPass
 	case "scenario":
-		if len(args) < 2 || args[1] != "validate" {
-			usage(stderr)
-			return exitError
+		if len(args) >= 2 && args[1] == "validate" {
+			return cmdValidate(ctx, args[2:], stdout, stderr)
 		}
-		return cmdValidate(args[2:], stdout, stderr)
+		if len(args) >= 2 && args[1] == "list" {
+			return cmdList(stdout, stderr)
+		}
+		usage(stderr)
+		return exitError
+	case "pack":
+		if len(args) == 3 && (args[1] == "digest" || args[1] == "verify") {
+			return cmdPack(ctx, args[1], args[2], stdout, stderr)
+		}
+		usage(stderr)
+		return exitError
 	case "range":
 		if len(args) < 2 {
 			usage(stderr)
@@ -87,79 +100,190 @@ func usage(w io.Writer) {
 
 Usage:
   redfilade version
+  redfilade scenario list
   redfilade scenario validate [DIR...]
-  redfilade range run DIR --build vulnerable|secure [--yes] [--out DIR]
-  redfilade range gate [DIR...] [--yes] [--out DIR] [--junit FILE]
+  redfilade pack digest DIR
+  redfilade pack verify DIR
+  redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
+  redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
   redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
                  [--sarif FILE] [--junit FILE] [--out DIR] [--location PATH]
+
+Scenarios built into Redfilade run by id. A directory is an external pack:
+it must carry a valid signature, or be run with --allow-unsigned and its id
+confirmed. Non-interactive runs must also list the pack's exact digest with
+--allow-digest or --allowlist FILE.
 
 Targets always run in an isolated container cell, never directly on your
 machine. Only test servers you own or are authorised to test.
 `)
 }
 
-// --- scenario validate -----------------------------------------------------
+// --- scenario list / validate, pack ------------------------------------------
 
-func scenarioDirs(args []string) ([]string, error) {
-	if len(args) > 0 {
-		return args, nil
-	}
-	m, err := filepath.Glob(filepath.Join("scenarios", "*", scenario.FileName))
-	if err != nil {
-		return nil, err
-	}
-	var dirs []string
-	for _, f := range m {
-		dirs = append(dirs, filepath.Dir(f))
-	}
-	sort.Strings(dirs)
-	if len(dirs) == 0 {
-		return nil, errors.New("no scenarios found under scenarios/")
-	}
-	return dirs, nil
-}
-
-func cmdValidate(args []string, stdout, stderr io.Writer) int {
-	dirs, err := scenarioDirs(args)
+func cmdList(stdout, stderr io.Writer) int {
+	all, err := scenarios.Builtins()
 	if err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
+	for _, m := range all {
+		fmt.Fprintf(stdout, "%-24s %s  family %s  network %-4s  %s\n", m.ID, m.Level, m.Family, m.Needs.Network, report.Clean(m.Title, 80))
+	}
+	return exitPass
+}
+
+func checkBatteries(m *scenario.Manifest) error {
+	for _, s := range m.Exploit {
+		if s.Battery != "" {
+			if _, ok := battery.Get(s.Battery); !ok {
+				return fmt.Errorf("%s: unknown battery attack %q", m.ID, s.Battery)
+			}
+		}
+	}
+	return nil
+}
+
+func cmdValidate(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	code := exitPass
-	for _, d := range dirs {
+	if len(args) == 0 {
+		all, err := scenarios.Builtins()
+		if err != nil {
+			fmt.Fprintln(stderr, "invalid:", report.Clean(err.Error(), 2000))
+			return exitError
+		}
+		for _, m := range all {
+			if err := checkBatteries(m); err != nil {
+				fmt.Fprintln(stderr, "invalid:", err)
+				code = exitError
+				continue
+			}
+			fmt.Fprintf(stdout, "ok  %-24s built-in  (%s, %s, family %s)\n", m.ID, m.Kind, m.Level, m.Family)
+		}
+		return code
+	}
+	for _, d := range args {
 		m, err := scenario.Load(d)
+		if err == nil {
+			err = checkBatteries(m)
+		}
 		if err != nil {
 			fmt.Fprintln(stderr, "invalid:", report.Clean(err.Error(), 2000))
 			code = exitError
 			continue
 		}
-		for _, s := range m.Exploit {
-			if s.Battery != "" {
-				if _, ok := battery.Get(s.Battery); !ok {
-					fmt.Fprintf(stderr, "invalid: %s: unknown battery attack %q\n", d, s.Battery)
-					code = exitError
-				}
-			}
+		sig, _ := pack.Verifier{}.Check(ctx, d)
+		pinned := "images pinned by digest"
+		if !m.PinnedImages() {
+			pinned = "images NOT pinned by digest"
 		}
-		if code == exitPass {
-			fmt.Fprintf(stdout, "ok  %s  (%s, %s, family %s)\n", m.ID, m.Kind, m.Level, m.Family)
-		}
+		fmt.Fprintf(stdout, "ok  %-24s pack %s  signature %s  %s\n", m.ID, pack.Digest(m.Raw), sig, pinned)
 	}
 	return code
+}
+
+func cmdPack(ctx context.Context, sub, dir string, stdout, stderr io.Writer) int {
+	m, err := scenario.Load(dir)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", report.Clean(err.Error(), 2000))
+		return exitError
+	}
+	if sub == "digest" {
+		fmt.Fprintln(stdout, pack.Digest(m.Raw))
+		return exitPass
+	}
+	sig, err := pack.Verifier{}.Check(ctx, dir)
+	fmt.Fprintf(stdout, "%s  %s  signature %s\n", m.ID, pack.Digest(m.Raw), sig)
+	if err != nil {
+		fmt.Fprintln(stderr, "redfilade:", report.Clean(err.Error(), 500))
+	}
+	if sig != pack.Verified {
+		return exitFindings
+	}
+	return exitPass
 }
 
 // --- shared helpers ------------------------------------------------------------
 
 type common struct {
-	yes     bool
-	out     string
-	timeout time.Duration
+	yes           bool
+	out           string
+	timeout       time.Duration
+	allowUnsigned bool
+	confirm       string
+	allowDigests  digestList
+	allowlist     string
 }
+
+type digestList []string
+
+func (d *digestList) String() string     { return strings.Join(*d, ",") }
+func (d *digestList) Set(v string) error { *d = append(*d, v); return nil }
 
 func addCommon(fs *flag.FlagSet, c *common) {
 	fs.BoolVar(&c.yes, "yes", false, "skip the consent prompt (required when not on a terminal, e.g. in CI)")
 	fs.StringVar(&c.out, "out", "redfilade-results", "directory for evidence and reports")
 	fs.DurationVar(&c.timeout, "timeout", 120*time.Second, "limit for each run")
+	fs.BoolVar(&c.allowUnsigned, "allow-unsigned", false, "allow an unsigned external pack (its id must be confirmed)")
+	fs.StringVar(&c.confirm, "confirm", "", "the external pack id, confirming you want to run it unsigned")
+	fs.Var(&c.allowDigests, "allow-digest", "exact external pack digest allowed in non-interactive runs (repeatable)")
+	fs.StringVar(&c.allowlist, "allowlist", "", "file of allowed external pack digests, one per line")
+}
+
+// target is a scenario resolved from an id (built-in) or a directory (pack).
+type target struct {
+	m         *scenario.Manifest
+	origin    string
+	digest    string
+	signature string
+}
+
+// resolve finds a scenario and decides whether it may run.
+func resolve(ctx context.Context, arg string, c common, stdin io.Reader, stdout io.Writer) (*target, error) {
+	if !strings.ContainsAny(arg, `/\.`) {
+		if m, ok := scenarios.Builtin(arg); ok {
+			return &target{m: m, origin: "built-in", signature: "built-in"}, nil
+		}
+		if _, err := os.Stat(arg); err != nil {
+			return nil, fmt.Errorf("no built-in scenario %q (see: redfilade scenario list)", arg)
+		}
+	}
+	m, err := scenario.Load(arg)
+	if err != nil {
+		return nil, errors.New(report.Clean(err.Error(), 2000))
+	}
+	if err := checkBatteries(m); err != nil {
+		return nil, err
+	}
+	digest := pack.Digest(m.Raw)
+	sig, verr := pack.Verifier{}.Check(ctx, arg)
+	if verr != nil {
+		fmt.Fprintln(stdout, "  signature check:", report.Clean(verr.Error(), 300))
+	}
+	allowed := map[string]bool{}
+	for _, d := range c.allowDigests {
+		allowed[d] = true
+	}
+	if c.allowlist != "" {
+		list, err := pack.ParseAllowlist(c.allowlist)
+		if err != nil {
+			return nil, err
+		}
+		for d := range list {
+			allowed[d] = true
+		}
+	}
+	interactive := !c.yes && isTerminal(stdin)
+	confirm := c.confirm
+	if sig != pack.Verified && sig != pack.Invalid && c.allowUnsigned && confirm == "" && interactive {
+		fmt.Fprintf(stdout, "\n%s is an UNSIGNED external pack (%s).\nType its id to confirm: ", m.ID, digest)
+		line, _ := bufio.NewReader(io.LimitReader(stdin, 128)).ReadString('\n')
+		confirm = strings.TrimSpace(line)
+	}
+	if err := pack.Decide(m, digest, sig, pack.Policy{AllowUnsigned: c.allowUnsigned, Confirm: confirm, AllowedDigests: allowed, Interactive: interactive}); err != nil {
+		return nil, err
+	}
+	return &target{m: m, origin: "external pack", digest: digest, signature: sig}, nil
 }
 
 func isTerminal(r io.Reader) bool {
@@ -247,16 +371,17 @@ func cmdRangeRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 	build := fs.String("build", "", "which twin to run: vulnerable or secure")
 	dir, rest := splitPositional(args)
 	if err := fs.Parse(rest); err != nil || dir == "" || (*build != "vulnerable" && *build != "secure") {
-		fmt.Fprintln(stderr, "usage: redfilade range run DIR --build vulnerable|secure [--yes]")
+		fmt.Fprintln(stderr, "usage: redfilade range run ID|DIR --build vulnerable|secure [--yes]")
 		return exitError
 	}
-	m, err := scenario.Load(dir)
+	t, err := resolve(ctx, dir, c, stdin, stdout)
 	if err != nil {
-		fmt.Fprintln(stderr, "redfilade:", report.Clean(err.Error(), 2000))
+		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
+	m := t.m
 	o, tier := opts(ctx, runner, c)
-	if !approve(consent.FromManifest(m, *build, tier, false), c, stdin, stdout, stderr) {
+	if !approve(consent.FromManifest(m, *build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
 		return exitError
 	}
 	ev, err := run.Scenario(ctx, m, *build, o)
@@ -294,22 +419,32 @@ func cmdRangeGate(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		return exitError
 	}
 	dirs = append(dirs, fs.Args()...)
-	dirs, err := scenarioDirs(dirs)
-	if err != nil {
-		fmt.Fprintln(stderr, "redfilade:", err)
-		return exitError
+	var targets []*target
+	if len(dirs) == 0 {
+		all, err := scenarios.Builtins()
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		for _, m := range all {
+			targets = append(targets, &target{m: m, origin: "built-in", signature: "built-in"})
+		}
+	}
+	for _, d := range dirs {
+		t, err := resolve(ctx, d, c, stdin, stdout)
+		if err != nil {
+			fmt.Fprintln(stderr, "redfilade:", err)
+			return exitError
+		}
+		targets = append(targets, t)
 	}
 	o, tier := opts(ctx, runner, c)
 	var cases []report.Case
 	failed := false
-	for _, d := range dirs {
-		m, err := scenario.Load(d)
-		if err != nil {
-			fmt.Fprintln(stderr, "redfilade:", report.Clean(err.Error(), 2000))
-			return exitError
-		}
+	for _, t := range targets {
+		m := t.m
 		for _, build := range []string{"vulnerable", "secure"} {
-			if !approve(consent.FromManifest(m, build, tier, false), c, stdin, stdout, stderr) {
+			if !approve(consent.FromManifest(m, build, tier, t.origin, t.digest, t.signature), c, stdin, stdout, stderr) {
 				return exitError
 			}
 			ev, err := run.Scenario(ctx, m, build, o)
@@ -342,7 +477,7 @@ func cmdRangeGate(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		fmt.Fprintln(stdout, "\nRange gate: FAILED")
 		return exitFindings
 	}
-	fmt.Fprintf(stdout, "\nRange gate: passed (%d scenarios: every vulnerable twin exploited, every secure twin held)\n", len(dirs))
+	fmt.Fprintf(stdout, "\nRange gate: passed (%d scenarios: every vulnerable twin exploited, every secure twin held)\n", len(targets))
 	return exitPass
 }
 
@@ -355,7 +490,7 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	addCommon(fs, &c)
 	image := fs.String("image", "", "container image of the MCP server under test (required)")
 	server := fs.String("server", "", `command to start the server inside the image, e.g. "node dist/index.js"`)
-	level := fs.String("level", "L1", "test level (L1 available today)")
+	level := fs.String("level", "L1", "test level: L1, or L2 (includes L1)")
 	protocol := fs.String("protocol", "2026-07-28", "MCP protocol revision: 2026-07-28 or 2025-11-25")
 	sarif := fs.String("sarif", "", "write SARIF 2.1.0 to this file")
 	junit := fs.String("junit", "", "write JUnit XML to this file")
@@ -372,12 +507,17 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		return exitError
 	}
 	if len(battery.ForLevel(*level)) == 0 {
-		fmt.Fprintf(stderr, "redfilade: level %s has no attacks yet (available: L1)\n", *level)
+		fmt.Fprintf(stderr, "redfilade: level %s has no attacks yet (available: L1, L2)\n", *level)
 		return exitError
 	}
 	o, tier := opts(ctx, runner, c)
 	p := consent.Plan{ScenarioID: "battery-" + strings.ToLower(*level), Kind: "battery", Level: *level, Family: "multiple",
 		Risk: "low", Build: "target", Image: *image, Network: "none", Tier: tier}
+	for _, a := range battery.ForLevel(*level) {
+		if a.Network == "sink" {
+			p.Network = "sink"
+		}
+	}
 	if !approve(p, c, stdin, stdout, stderr) {
 		return exitError
 	}

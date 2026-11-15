@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/redfilade/redfilade/internal/battery"
@@ -57,14 +59,14 @@ func Scenario(ctx context.Context, m *scenario.Manifest, build string, o Options
 	}
 	defer w.Close()
 	subject := report.Subject{Mode: "range", ScenarioID: m.ID, Build: build, Image: b.Image, Protocol: m.Protocol, Level: m.Level, Family: m.Family}
-	steps := func(ctx context.Context, c *mcp.Client, tools []mcp.Tool) error {
+	steps := func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env battery.Env) error {
 		for i, s := range m.Exploit {
 			if s.Battery != "" {
 				a, ok := battery.Get(s.Battery)
 				if !ok {
 					return fmt.Errorf("step %d: unknown battery attack %q", i+1, s.Battery)
 				}
-				if err := a.Run(ctx, c, tools); err != nil {
+				if err := a.Run(ctx, c, tools, env); err != nil {
 					return fmt.Errorf("step %d (%s): %w", i+1, s.Battery, err)
 				}
 				continue
@@ -80,32 +82,40 @@ func Scenario(ctx context.Context, m *scenario.Manifest, build string, o Options
 }
 
 // Target runs a level's battery against a builder's own server image.
+// Levels are cumulative (L2 includes L1).
 func Target(ctx context.Context, image string, cmd []string, protocol, level string, o Options) (*report.Evidence, error) {
 	attacks := battery.ForLevel(level)
 	if len(attacks) == 0 {
 		return nil, fmt.Errorf("no battery attacks exist for %s yet", level)
 	}
-	// A builder's server gets an empty synthetic world: nothing of theirs and
-	// nothing of the user's is mounted.
-	w, err := world.Build(&scenario.Manifest{})
-	if err != nil {
-		return nil, err
-	}
-	defer w.Close()
+	// A builder's server gets only Redfilade's synthetic world: canary files
+	// and variables it must never expose, and nothing of the user's.
+	synth := &scenario.Manifest{Needs: scenario.Needs{Network: "none"}}
 	var checks []scenario.Check
 	seen := map[string]bool{}
 	for _, a := range attacks {
+		synth.World = append(synth.World, a.World...)
+		synth.Needs.Env = append(synth.Needs.Env, a.Env...)
+		if a.Network == "sink" {
+			synth.Needs.Network = "sink"
+		}
 		for _, c := range a.Checks {
-			if !seen[c.Fact] {
-				seen[c.Fact] = true
+			key := c.Fact + "|" + c.Canary + "|" + c.Path
+			if !seen[key] {
+				seen[key] = true
 				checks = append(checks, c)
 			}
 		}
 	}
+	w, err := world.Build(synth)
+	if err != nil {
+		return nil, err
+	}
+	defer w.Close()
 	subject := report.Subject{Mode: "test", Image: image, Protocol: protocol, Level: level}
-	steps := func(ctx context.Context, c *mcp.Client, tools []mcp.Tool) error {
+	steps := func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env battery.Env) error {
 		for _, a := range attacks {
-			if err := a.Run(ctx, c, tools); err != nil {
+			if err := a.Run(ctx, c, tools, env); err != nil {
 				return fmt.Errorf("%s: %w", a.ID, err)
 			}
 		}
@@ -115,10 +125,10 @@ func Target(ctx context.Context, image string, cmd []string, protocol, level str
 	if pull == "" {
 		pull = "missing"
 	}
-	return execute(ctx, o, w, subject, cmd, "none", checks, "any", pull, steps)
+	return execute(ctx, o, w, subject, cmd, synth.Needs.Network, checks, "any", pull, steps)
 }
 
-type stepFunc func(ctx context.Context, c *mcp.Client, tools []mcp.Tool) error
+type stepFunc func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env battery.Env) error
 
 func execute(ctx context.Context, o Options, w *world.World, subject report.Subject, cmd []string, network string,
 	checks []scenario.Check, match, pull string, steps stepFunc) (*report.Evidence, error) {
@@ -135,12 +145,23 @@ func execute(ctx context.Context, o Options, w *world.World, subject report.Subj
 		StartedAt: time.Now().UTC(),
 		Signature: report.Unsigned,
 	}
-	net := network
-	if net == "sink" {
-		// The egress sink network arrives with the hosted runner; until then a
-		// scenario that declares it still gets no network at all.
-		net = "none"
-		ev.Errors = append(ev.Errors, "egress sink not available in this runner; the cell had no network")
+	net := "none"
+	env := battery.Env{Canaries: w.Canaries}
+	var sink *sandbox.Sink
+	if network == "sink" {
+		logDir := filepath.Join(w.Root, "sink")
+		if err := os.Mkdir(logDir, 0o777); err != nil {
+			return nil, err
+		}
+		_ = os.Chmod(logDir, 0o777)
+		var err error
+		sink, err = o.Runner.StartSink(ctx, runID, logDir, w.Canaries[scenario.SinkCanary], o.Tier)
+		if err != nil {
+			return nil, fmt.Errorf("start egress sink: %w", err)
+		}
+		defer sink.Stop()
+		net = sink.Network
+		env.SinkURL = "http://" + sandbox.SinkHost + ":" + sandbox.SinkPort
 	}
 	cell, err := o.Runner.Start(ctx, sandbox.Spec{
 		Name: "redfilade-" + runID, Image: subject.Image, Cmd: cmd, WorldDir: w.Dir,
@@ -166,7 +187,7 @@ func execute(ctx context.Context, o Options, w *world.World, subject report.Subj
 			ev.Errors = append(ev.Errors, "tools/list: "+err.Error())
 			return
 		}
-		if err := steps(ctx, client, tools); err != nil {
+		if err := steps(ctx, client, tools, env); err != nil {
 			ev.Errors = append(ev.Errors, err.Error())
 			return
 		}
@@ -186,9 +207,24 @@ func execute(ctx context.Context, o Options, w *world.World, subject report.Subj
 	if err != nil {
 		ev.Errors = append(ev.Errors, "world diff: "+err.Error())
 	}
+	var egress []oracle.Egress
+	if sink != nil {
+		events, err := sink.Events()
+		if err != nil {
+			ev.Errors = append(ev.Errors, "sink log: "+err.Error())
+		}
+		for _, e := range events {
+			egress = append(egress, oracle.Egress(e))
+		}
+		ev.Egress = make([]oracle.Egress, len(egress))
+		for i, e := range egress {
+			ev.Egress[i] = oracle.Egress{Method: report.Clean(w.Redact(e.Method), 16), Host: report.Clean(w.Redact(e.Host), 256),
+				Path: report.Clean(w.Redact(e.Path), 512), Query: report.Clean(w.Redact(e.Query), 512), Body: report.Clean(w.Redact(e.Body), 512)}
+		}
+	}
 	frames := client.Recorder().Frames()
 	ev.Oracle = oracle.Evaluate(oracle.Input{
-		Frames: frames, Changes: changes, Canaries: w.Canaries,
+		Frames: frames, Egress: egress, Changes: changes, Canaries: w.Canaries,
 		Checks: checks, Match: match, Completed: completed, Network: network,
 	})
 	ev.WorldChanges = changes
