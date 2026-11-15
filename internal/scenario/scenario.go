@@ -121,10 +121,18 @@ type Check struct {
 
 // Facts the oracle can observe.
 var Facts = map[string]bool{
-	"canary_leaked":      true, // a canary value crossed from the target to the client
-	"world_file_changed": true, // a world file's content changed during the run
-	"internals_leaked":   true, // stack traces, source paths or runtime internals in replies
+	"canary_leaked":         true, // a canary value crossed from the target to the client
+	"world_file_changed":    true, // a world file's content changed during the run
+	"internals_leaked":      true, // stack traces, source paths or runtime internals in replies
+	"secret_pattern_leaked": true, // well-known credential formats in replies
+	"sensitive_file_read":   true, // contents of system files (passwd, private keys, environ) in replies
+	"egress_reached_sink":   true, // the target made a network request (needs network "sink")
+	"canary_egressed":       true, // a canary was sent out to the sink (exfiltration)
 }
+
+// SinkCanary is planted automatically in every scenario that uses the sink;
+// the sink includes it in every response.
+const SinkCanary = "SINK"
 
 // Load reads and validates dir/scenario.json.
 func Load(dir string) (*Manifest, error) {
@@ -302,9 +310,13 @@ func (m *Manifest) Validate() error {
 			continue
 		}
 		switch c.Fact {
-		case "canary_leaked":
+		case "canary_leaked", "canary_egressed":
 			if !canaries[c.Canary] {
 				bad("oracle check %d: canary %q is not planted in the world or env", i+1, c.Canary)
+			}
+		case "egress_reached_sink":
+			if m.Needs.Network != "sink" {
+				bad("oracle check %d: egress_reached_sink needs needs.network \"sink\"", i+1)
 			}
 		case "world_file_changed":
 			if !seen[c.Path] {
@@ -360,6 +372,9 @@ func (m *Manifest) Canaries() map[string]bool {
 	}
 	for _, e := range m.Needs.Env {
 		add(e.Value)
+	}
+	if m.Needs.Network == "sink" {
+		out[SinkCanary] = true
 	}
 	return out
 }

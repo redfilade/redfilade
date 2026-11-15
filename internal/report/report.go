@@ -25,18 +25,19 @@ const SchemaEvidence = "redfilade.evidence/v1"
 
 // Evidence is the full record of one run.
 type Evidence struct {
-	Schema       string         `json:"schema"`
-	RunID        string         `json:"run_id"`
-	Tool         Tool           `json:"tool"`
-	Subject      Subject        `json:"subject"`
-	Isolation    string         `json:"isolation"`
-	StartedAt    time.Time      `json:"started_at"`
-	FinishedAt   time.Time      `json:"finished_at"`
-	Oracle       oracle.Result  `json:"oracle"`
-	WorldChanges []world.Change `json:"world_changes"`
-	Frames       []mcp.Frame    `json:"frames"`
-	Errors       []string       `json:"errors,omitempty"`
-	Signature    Signature      `json:"signature"`
+	Schema       string          `json:"schema"`
+	RunID        string          `json:"run_id"`
+	Tool         Tool            `json:"tool"`
+	Subject      Subject         `json:"subject"`
+	Isolation    string          `json:"isolation"`
+	StartedAt    time.Time       `json:"started_at"`
+	FinishedAt   time.Time       `json:"finished_at"`
+	Oracle       oracle.Result   `json:"oracle"`
+	WorldChanges []world.Change  `json:"world_changes"`
+	Egress       []oracle.Egress `json:"egress,omitempty"`
+	Frames       []mcp.Frame     `json:"frames"`
+	Errors       []string        `json:"errors,omitempty"`
+	Signature    Signature       `json:"signature"`
 }
 
 // Tool identifies the Redfilade build that produced the evidence.
@@ -185,7 +186,19 @@ var rules = map[string]sarifRule{
 		Help:             sarifText{"Return a generic error to the client and log details on the server only."}},
 	"world_file_changed": {ID: "RF-WORLD-TAMPER", Name: "UnauthorisedFileChange",
 		ShortDescription: sarifText{"A protected file was modified"},
-		Help:             sarifText{"The target changed a file the scenario marks as protected."}},
+		Help:             sarifText{"The target changed a file outside the area it is allowed to write. Resolve paths and reject anything outside the allowed directory."}},
+	"secret_pattern_leaked": {ID: "RF-SECRET-PATTERN", Name: "CredentialInResponse",
+		ShortDescription: sarifText{"A credential-shaped value was returned to the client"},
+		Help:             sarifText{"Never return environment variables, keys or tokens in tool output."}},
+	"sensitive_file_read": {ID: "RF-FILE-READ", Name: "SensitiveFileRead",
+		ShortDescription: sarifText{"The contents of a sensitive file were returned"},
+		Help:             sarifText{"Resolve requested paths and reject anything outside the allowed directory, including encoded and absolute paths."}},
+	"egress_reached_sink": {ID: "RF-SSRF", Name: "ServerSideRequestForgery",
+		ShortDescription: sarifText{"The server fetched an attacker-chosen URL"},
+		Help:             sarifText{"Allow-list the hosts a tool may contact and block private, link-local and metadata addresses."}},
+	"canary_egressed": {ID: "RF-EXFILTRATION", Name: "SecretSentToNetwork",
+		ShortDescription: sarifText{"A planted secret was sent to an external address"},
+		Help:             sarifText{"The server sent a secret to an attacker-controlled destination."}},
 }
 
 // WriteSARIF writes findings as SARIF 2.1.0. location is the repository path
@@ -217,7 +230,7 @@ func WriteSARIF(w io.Writer, e *Evidence, version, location string) error {
 			Locations: []sarifLocation{{sarifPhysical{sarifArtifact{location}}}}})
 	}
 	var rs []sarifRule
-	for _, fact := range []string{"canary_leaked", "internals_leaked", "world_file_changed"} {
+	for _, fact := range []string{"canary_leaked", "canary_egressed", "secret_pattern_leaked", "sensitive_file_read", "egress_reached_sink", "internals_leaked", "world_file_changed"} {
 		if used[fact] {
 			rs = append(rs, rules[fact])
 		}

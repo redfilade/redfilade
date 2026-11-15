@@ -6,12 +6,17 @@
 package sandbox
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +47,16 @@ type Spec struct {
 	Pull     string // "never" (default, locally built twins) or "missing"
 }
 
+// reRunNetwork matches the per-run internal networks this package creates.
+var reRunNetwork = regexp.MustCompile(`^redfilade-net-[0-9a-f]{8,32}$`)
+
+// Egress sink settings (ADR-0010: no route to the internet, ever).
+const (
+	SinkImage = "redfilade-infra/sink:latest"
+	SinkHost  = "sink.redfilade.test"
+	SinkPort  = "8080"
+)
+
 // Docker resource limits for every cell.
 const (
 	memoryLimit = "256m"
@@ -63,7 +78,7 @@ func Args(s Spec) ([]string, error) {
 	if net == "" {
 		net = "none"
 	}
-	if net == "host" || net == "bridge" || strings.HasPrefix(net, "container:") {
+	if net != "none" && !reRunNetwork.MatchString(net) {
 		return nil, fmt.Errorf("sandbox: network %q is never allowed", net)
 	}
 	pull := s.Pull
@@ -210,4 +225,88 @@ func (c *capped) String() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.buf.String()
+}
+
+// Sink is a running egress sink on a per-run internal network.
+type Sink struct {
+	Network string
+	name    string
+	logDir  string
+	runner  Runner
+}
+
+// SinkEvent is one request the sink recorded.
+type SinkEvent struct {
+	Method string `json:"method"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
+	Query  string `json:"query"`
+	Body   string `json:"body"`
+}
+
+// StartSink creates an internal network (no external route) and starts the
+// sink on it under the name sink.redfilade.test. logDir must be a private
+// directory owned by the run.
+func (r Runner) StartSink(ctx context.Context, runID, logDir, canary string, tier Tier) (*Sink, error) {
+	netName := "redfilade-net-" + runID
+	if !reRunNetwork.MatchString(netName) {
+		return nil, errors.New("sandbox: invalid run id for network")
+	}
+	if strings.ContainsAny(logDir, ",=") {
+		return nil, errors.New("sandbox: sink log path contains unsafe characters")
+	}
+	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if out, err := exec.CommandContext(cctx, r.bin(), "network", "create", "--internal", "--label", "io.redfilade.cell=1", netName).CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("sandbox: create internal network: %v: %s", err, bytes.TrimSpace(out))
+	}
+	s := &Sink{Network: netName, name: "redfilade-sink-" + runID, logDir: logDir, runner: r}
+	args := []string{"run", "-d", "--rm", "--name", s.name,
+		"--network", netName, "--network-alias", SinkHost,
+		"--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--user", cellUser,
+		"--memory", "64m", "--memory-swap", "64m", "--cpus", "0.5", "--pids-limit", "32",
+		"--ipc", "none", "--log-driver", "none", "--pull", "never", "--label", "io.redfilade.cell=1",
+		"--mount", "type=bind,src=" + logDir + ",dst=/log",
+		"--env", "SINK_CANARY=" + canary}
+	if tier == TierGVisor {
+		args = append(args, "--runtime", "runsc")
+	}
+	args = append(args, "--", SinkImage)
+	if out, err := exec.CommandContext(cctx, r.bin(), args...).CombinedOutput(); err != nil {
+		s.Stop()
+		return nil, fmt.Errorf("sandbox: start sink: %v: %s", err, bytes.TrimSpace(out))
+	}
+	// Give the sink a moment to bind before the target starts.
+	time.Sleep(500 * time.Millisecond)
+	return s, nil
+}
+
+// Stop removes the sink and its network.
+func (s *Sink) Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, s.runner.bin(), "rm", "-f", s.name).Run()
+	_ = exec.CommandContext(ctx, s.runner.bin(), "network", "rm", s.Network).Run()
+}
+
+// Events reads what the sink recorded (bounded: 500 events, 2 MiB).
+func (s *Sink) Events() ([]SinkEvent, error) {
+	f, err := os.Open(filepath.Join(s.logDir, "requests.jsonl"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out []SinkEvent
+	sc := bufio.NewScanner(io.LimitReader(f, 2<<20))
+	sc.Buffer(make([]byte, 64<<10), 64<<10)
+	for sc.Scan() && len(out) < 500 {
+		var e SinkEvent
+		if json.Unmarshal(sc.Bytes(), &e) == nil {
+			out = append(out, e)
+		}
+	}
+	return out, nil
 }

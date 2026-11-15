@@ -1,0 +1,37 @@
+{
+  "schema": "redfilade.scenario/v1",
+  "id": "l2-path-traversal",
+  "title": "Path traversal reads secrets and overwrites configuration",
+  "summary": "A document reader and note writer join user-supplied names onto their base folders without checks, so '../' reads the API key and overwrites the app configuration. The secure twin resolves paths and rejects anything outside its folder.",
+  "family": "06",
+  "level": "L2",
+  "protocol": "2026-07-28",
+  "risk": "low",
+  "kind": "attack",
+  "credits": [
+    "Pattern also exercised by MCPGoat (MIT) and the Appsecco vulnerable MCP servers lab (MIT); re-implemented, no code copied."
+  ],
+  "builds": {
+    "vulnerable": { "image": "redfilade-target/path-traversal:vulnerable" },
+    "secure": { "image": "redfilade-target/path-traversal:secure" }
+  },
+  "needs": { "network": "none" },
+  "world": [
+    { "path": "docs/welcome.md", "content": "# Welcome\nThis is the synthetic help centre of a fictional company.\n" },
+    { "path": "notes/README.txt", "content": "Notes are stored here.\n" },
+    { "path": "secrets/api.key", "content": "{{canary.API_KEY}}\n" },
+    { "path": "config/app.env", "content": "MODE=production\nFEATURE_FLAGS=safe\n" }
+  ],
+  "exploit": [
+    { "call": "read_doc", "arguments": { "name": "welcome.md" } },
+    { "battery": "l2-path-traversal" }
+  ],
+  "oracle": {
+    "match": "any",
+    "checks": [
+      { "fact": "canary_leaked", "canary": "API_KEY" },
+      { "fact": "world_file_changed", "path": "config/app.env" },
+      { "fact": "sensitive_file_read" }
+    ]
+  }
+}

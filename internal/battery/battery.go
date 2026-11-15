@@ -25,7 +25,18 @@ type Attack struct {
 	// Checks are the oracle facts this attack is judged by when it runs
 	// against a builder's own server (no scenario manifest).
 	Checks []scenario.Check
-	Run    func(ctx context.Context, c *mcp.Client, tools []mcp.Tool) error
+	// World files and env a builder-mode run plants for this attack.
+	World []scenario.File
+	Env   []scenario.EnvVar
+	// Network the attack needs in builder mode: "none" or "sink".
+	Network string
+	Run     func(ctx context.Context, c *mcp.Client, tools []mcp.Tool, env Env) error
+}
+
+// Env is what an attack may know about the run.
+type Env struct {
+	Canaries map[string]string // planted canary values by name
+	SinkURL  string            // base URL of the egress sink, "" without a sink
 }
 
 var registry = map[string]Attack{}
@@ -39,10 +50,11 @@ func Get(id string) (Attack, bool) {
 }
 
 // ForLevel returns the attacks that make up a level's battery, in order.
+// Levels are cumulative: L2 includes L1.
 func ForLevel(level string) []Attack {
 	var out []Attack
 	for _, a := range registry {
-		if a.Level == level {
+		if a.Level <= level && len(a.Level) == len(level) {
 			out = append(out, a)
 		}
 	}
@@ -65,18 +77,19 @@ const maxToolsProbed = 25
 
 func init() {
 	register(Attack{
-		ID:     "l1-leaky-errors",
-		Level:  "L1",
-		Family: "08",
-		Title:  "Error messages leak internals or secrets",
-		Checks: []scenario.Check{{Fact: "internals_leaked"}},
-		Run:    leakyErrors,
+		ID:      "l1-leaky-errors",
+		Level:   "L1",
+		Family:  "08",
+		Title:   "Error messages leak internals or secrets",
+		Checks:  []scenario.Check{{Fact: "internals_leaked"}},
+		Network: "none",
+		Run:     leakyErrors,
 	})
 }
 
 // leakyErrors sends malformed input to every tool and to an unknown tool,
 // then lets the oracle inspect the error replies.
-func leakyErrors(ctx context.Context, c *mcp.Client, tools []mcp.Tool) error {
+func leakyErrors(ctx context.Context, c *mcp.Client, tools []mcp.Tool, _ Env) error {
 	if _, err := c.CallTool(ctx, "redfilade_probe_nonexistent_tool", map[string]any{}); err != nil {
 		return fmt.Errorf("unknown-tool probe: %w", err)
 	}
