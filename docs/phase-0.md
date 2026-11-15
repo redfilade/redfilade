@@ -13,7 +13,7 @@ Phase 0 is done when every item below is ticked. No feature code lands before th
 | 5 | Dependency policy committed: pnpm settings, uv lock, `go.sum` | [`pnpm-workspace.yaml`](../pnpm-workspace.yaml), [`.npmrc`](../.npmrc), [`pyproject.toml`](../pyproject.toml), [`uv.lock`](../uv.lock), [`go.mod`](../go.mod) | ✅ Committed. `go.sum` appears with the first Go dependency; CI already builds with `-mod=readonly` |
 | 6 | `SECURITY.md`, threat model v0 (STRIDE on the four planes), ADR-001 to ADR-012 | [`SECURITY.md`](../SECURITY.md), [`threat-model/v0.md`](threat-model/v0.md), [`adr/`](adr/) | ✅ Committed |
 | 7 | Multi-tenant schema skeleton: `org_id`, `project_id`, RLS migration, UUIDv7 | [`db/migrations/0001_tenancy.sql`](../db/migrations/0001_tenancy.sql), [`db/tests/tenancy_test.sql`](../db/tests/tenancy_test.sql) | ✅ Committed; isolation test passes on Postgres 18 |
-| 8 | Release workflow proven with a dry-run `0.0.1`: cosign signature, SBOM, provenance | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | ✅ Committed · ⬜ run the dry run (step E). Trusted publishing to npm and PyPI is added with the first published package |
+| 8 | Release workflow proven with a dry-run `0.0.1`: cosign signature, SBOM, provenance | [`.github/workflows/release.yml`](../.github/workflows/release.yml) | ✅ Dry run `0.0.1` passed on 2026-11-15 ([run](https://github.com/redfilade/redfilade/actions/runs/43725367896)): binaries, SBOM, keyless cosign signature verified, SLSA provenance. Trusted publishing to npm and PyPI is added with the first published package |
 
 ## One-time steps for an org owner
 
@@ -29,7 +29,7 @@ Wait until the `ci` workflow has run once on `main`, so the status checks exist.
 | File | What it enforces |
 |---|---|
 | `main-integrity.json` | No deletion or force push, linear history, signed commits, pull requests only, all four CI checks green. **Nobody can bypass it.** |
-| `main-review.json` | One approving review from a code owner, re-approval after new pushes. Org owners may merge their *own* pull requests without a second reviewer, but still only through a pull request that passes every check above. Remove the bypass when a second maintainer joins. |
+| `main-review.json` | One approving review from a code owner, re-approval after new pushes. **Imported disabled while there is one maintainer:** GitHub combines the pull-request rules of both `main` rulesets, so the owner bypass here cannot override the no-bypass integrity ruleset and every pull request would stay blocked. `main-integrity` still forces pull requests, signed commits and green checks. Set it to **Active** when a second maintainer joins. |
 | `release-tags.json` | Only org owners can create `v*` tags; tags can never be moved or deleted. |
 
 ### B. Create the protected release environment

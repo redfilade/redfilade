@@ -17,7 +17,7 @@
 | CLI: `scenario validate`, `range run`, `range gate`, `test` | `cmd/redfilade` | ✅ |
 | CI: range gate and builder test in real cells | `ci.yml` → `range-gate` | ✅ runs on every PR |
 | GitHub Action for builders, writing SARIF | `action.yml`, `ci.yml` → `action-selftest` | ✅ runs on every PR |
-| Signed evidence that verifies | `release.yml` → `range-proof` | ⬜ needs the `release` environment and a maintainer-approved dry run (Phase 0 steps B and E) |
+| Signed evidence that verifies | `release.yml` → `range-proof` | ✅ Signed and verified in the `0.0.1` dry run ([run](https://github.com/redfilade/redfilade/actions/runs/43725367896)) |
 
 ## What is honest about this phase
 

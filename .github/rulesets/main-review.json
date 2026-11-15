@@ -1,7 +1,7 @@
 {
   "name": "main: review by a code owner",
   "target": "branch",
-  "enforcement": "active",
+  "enforcement": "disabled",
   "conditions": {
     "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] }
   },
