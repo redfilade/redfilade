@@ -42,18 +42,13 @@ Repository **Settings → Environments → New environment** named `release`:
 
 ### C. Allow-list the third-party actions
 
-Org **Settings → Actions → General → Allow specified actions and reusable workflows**. Paste these exact pins, one per line (GitHub's own `actions/*` and `github/*` are already allowed):
+Org **Settings → Actions → General → Allow specified actions and reusable workflows**. Tick **Allow actions created by GitHub**, leave **Marketplace verified creators** unticked, and paste these exact pins **separated by commas** (the box rejects one long line without commas). GitHub's own `actions/*` and `github/*` are covered by the first tickbox:
 
 ```text
-step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a
-pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
-astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e
-sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
-anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c
-google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932
-google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932
+step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a, pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115, astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2, ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e, sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532, anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c, google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932, google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@32d3cd482bdadfb38b186c0ad1b031902d55d932, google/osv-scanner-action/osv-scanner-action@32d3cd482bdadfb38b186c0ad1b031902d55d932, google/osv-scanner-action/osv-reporter-action@32d3cd482bdadfb38b186c0ad1b031902d55d932
 ```
+
+The last two are actions the OSV reusable workflows call internally.
 
 When Renovate bumps a pin, update this list in the same review.
 
