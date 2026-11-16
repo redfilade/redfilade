@@ -12,12 +12,16 @@
   "rangeStrategy": "pin",
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": ["before 6am on monday"],
+    "schedule": [
+      "before 6am on monday"
+    ],
     "minimumReleaseAge": "7 days"
   },
   "vulnerabilityAlerts": {
     "enabled": true,
-    "labels": ["security"]
+    "labels": [
+      "security"
+    ]
   },
   "pre-commit": {
     "enabled": true
@@ -25,13 +29,32 @@
   "packageRules": [
     {
       "description": "Never automerge anything: every update is a reviewed decision",
-      "matchPackageNames": ["*"],
+      "matchPackageNames": [
+        "*"
+      ],
       "automerge": false
     },
     {
       "description": "Group GitHub Action updates so pins move together",
-      "matchManagers": ["github-actions"],
+      "matchManagers": [
+        "github-actions"
+      ],
       "groupName": "GitHub Actions"
+    },
+    {
+      "description": "Supported runtime ranges (engines, requires-python) are a project decision, not something to pin",
+      "matchDepTypes": [
+        "engines",
+        "requires-python"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Keep a version range for the Python build backend so downstream builds are not locked to one release",
+      "matchDepTypes": [
+        "build-system.requires"
+      ],
+      "rangeStrategy": "replace"
     }
   ]
 }

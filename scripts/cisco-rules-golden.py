@@ -22,7 +22,7 @@ import yara
 
 
 # Fixture values that look like real credentials are replaced before matching,
-# so the repository never holds secret-shaped strings (CLAUDE.md). The rules
+# so the repository never holds secret-shaped strings (CONTRIBUTING.md). The rules
 # are then evaluated on the replaced text, so the golden results stay exact.
 SECRET_SHAPED = re.compile(r"(?i)\b((?:[a-z_]*api[_-]?key|[a-z_]*token|[a-z_]*secret|password)\s*[=:]\s*)(?!REDFILADE_TEST_)(?=[A-Za-z_\-]*[0-9])[A-Za-z0-9_\-]{12,}")
 
