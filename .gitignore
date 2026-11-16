@@ -26,3 +26,8 @@ __pycache__/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Local notes for AI coding assistants stay out of the repository
+CLAUDE.md
+CLAUDE.local.md
+.claude/
