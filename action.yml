@@ -28,7 +28,7 @@ inputs:
     required: false
     default: ""
   level:
-    description: Test level (L1 available today)
+    description: Test level, L1 or L2 (L2 includes L1)
     required: false
     default: L1
   protocol:

@@ -52,3 +52,27 @@ func TestRefusals(t *testing.T) {
 		t.Errorf("escape-class on gVisor refused: %v", err)
 	}
 }
+
+func TestGatePlanOneScreen(t *testing.T) {
+	m := &scenario.Manifest{ID: "l2-ssrf", Kind: "attack", Level: "L2", Family: "05", Risk: "low"}
+	m.Builds.Vulnerable.Image = "redfilade-target/ssrf:vulnerable"
+	m.Builds.Secure.Image = "redfilade-target/ssrf:secure"
+	m.Needs.Network = "sink"
+	g := GatePlan{Plans: []Plan{
+		FromManifest(m, "vulnerable", sandbox.TierDocker, "built-in", "", "built-in"),
+		FromManifest(m, "secure", sandbox.TierDocker, "external pack", "sha256:abc", "unsigned"),
+	}}
+	if err := g.Check(); err != nil {
+		t.Fatal(err)
+	}
+	out := g.Render()
+	for _, want := range []string{"run 2 targets", "redfilade-target/ssrf:vulnerable", "sink", "plain Docker: WEAKER"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("gate screen missing %q:\n%s", want, out)
+		}
+	}
+	g.Plans[0].Risk = "escape"
+	if err := g.Check(); err == nil {
+		t.Error("an escape-class run under plain Docker must refuse the whole gate")
+	}
+}

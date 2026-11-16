@@ -31,11 +31,12 @@ type Plan struct {
 	WorldFiles []string
 	EnvNames   []string
 	Tier       sandbox.Tier
-	Origin     string // "built-in" or "external pack"
-	Digest     string // external packs only
-	Signature  string // built-in, verified, unsigned, unverifiable
-	Model      string // L3 agent scenarios: the model that acts
-	Trials     int    // L3 agent scenarios: independent runs
+	Origin     string   // "built-in" or "external pack"
+	Digest     string   // external packs only
+	Signature  string   // built-in, verified, unsigned, unverifiable
+	Model      string   // L3 agent scenarios: the model that acts
+	Trials     int      // L3 agent scenarios: independent runs
+	Attacks    []string // builder tests: the attacks that will run
 }
 
 // ErrRefused means the plan is not allowed on this machine at all.
@@ -104,6 +105,9 @@ func (p Plan) Render() string {
 		line("Env vars", "none")
 	} else {
 		line("Env vars", strings.Join(p.EnvNames, ", "))
+	}
+	if len(p.Attacks) > 0 {
+		line("Attacks", strings.Join(p.Attacks, ", "))
 	}
 	if p.Model != "" {
 		line("Agent model", p.Model)
@@ -235,5 +239,64 @@ func (p DefencePlan) Render() string {
 	if p.ModelNote != "" {
 		line("Agents", p.ModelNote)
 	}
+	return b.String()
+}
+
+// GatePlan is one consent screen for a whole range gate, so a user approves
+// the batch once instead of once per cell. Every plan is still checked.
+type GatePlan struct{ Plans []Plan }
+
+// Check refuses the gate if any of its runs is refused.
+func (g GatePlan) Check() error {
+	for _, p := range g.Plans {
+		if err := p.Check(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Render lists every cell the gate will start.
+func (g GatePlan) Render() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Redfilade is about to run %d targets in isolated cells (the range gate).\n\n", len(g.Plans))
+	fmt.Fprintf(&b, "  %-24s %-10s %-8s %-6s %s\n", "Scenario", "Build", "Network", "Risk", "Image")
+	var tier sandbox.Tier
+	var external, agents []string
+	for _, p := range g.Plans {
+		net := "none"
+		if p.Network == "sink" {
+			net = "sink"
+		}
+		risk := "low"
+		if p.Risk == "escape" {
+			risk = "ESCAPE"
+		}
+		fmt.Fprintf(&b, "  %-24s %-10s %-8s %-6s %s\n", p.ScenarioID, p.Build, net, risk, p.Image)
+		tier = p.Tier
+		if p.Origin == "external pack" && p.Build == "vulnerable" {
+			external = append(external, fmt.Sprintf("%s %s (signature: %s)", p.ScenarioID, p.Digest, strings.ToUpper(p.Signature)))
+		}
+		if p.Model != "" && p.Build == "vulnerable" {
+			agents = append(agents, fmt.Sprintf("%s: %s, %d trials", p.ScenarioID, p.Model, p.Trials))
+		}
+	}
+	b.WriteString("\n")
+	for _, e := range external {
+		fmt.Fprintf(&b, "  EXTERNAL PACK %s\n", e)
+	}
+	for _, a := range agents {
+		fmt.Fprintf(&b, "  Agent        %s\n", a)
+		if strings.Contains(a, "anthropic:") {
+			b.WriteString("               the task, tool list and tool outputs (synthetic data only) go to the model API\n")
+		}
+	}
+	switch tier {
+	case sandbox.TierGVisor:
+		b.WriteString("  Isolation    gVisor (separate kernel boundary)\n")
+	case sandbox.TierDocker:
+		b.WriteString("  Isolation    plain Docker: WEAKER, shares your kernel\n")
+	}
+	b.WriteString("\n  Each cell gets no home folder, no SSH or cloud keys, no Docker socket\n  and none of your environment variables. \"sink\" is an internal trap\n  that records requests and never forwards them.\n")
 	return b.String()
 }

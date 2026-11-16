@@ -137,28 +137,33 @@ func Main(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io
 func usage(w io.Writer) {
 	fmt.Fprint(w, `Redfilade, the open MCP red-team range.
 
-Usage:
-  redfilade version
+Learn on practice targets (the Range):
   redfilade scenario list
-  redfilade scenario validate [DIR...]
-  redfilade pack digest DIR
-  redfilade pack verify DIR
-  redfilade triage summarize DIR
-  redfilade domain challenge DOMAIN
-  redfilade domain verify DOMAIN
-  redfilade domain list
-  redfilade hostile-server [--probes all] [--log FILE]
-  redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
-  redfilade client-report FILE [--sarif FILE] [--out DIR]
-  redfilade range run ID|DIR --build vulnerable|secure [--yes] [--out DIR]
+  redfilade range run ID --build vulnerable|secure [--yes] [--out DIR]
+                     [--model scripted:naive|scripted:careful|anthropic:MODEL] [--trials N]
   redfilade range gate [ID|DIR...] [--yes] [--out DIR] [--junit FILE]
-  redfilade test --image IMAGE [--server "CMD ARGS"] --level L1 [--yes]
-                 [--sarif FILE] [--junit FILE] [--out DIR] [--location PATH]
+
+Test an MCP server you own:
+  redfilade test --image IMAGE [--server "CMD ARGS"] --level L1|L2 [--yes]
+  redfilade test --url URL [--token-env VAR] [--foreign-token-env VAR] --level L1|L2 [--yes]
+      both take [--sarif FILE] [--junit FILE] [--out DIR] [--location PATH]
+  redfilade domain challenge DOMAIN | verify DOMAIN | list     (before --url on a domain)
+
+Test an MCP client, or measure a defence:
+  redfilade hostile-server [--probes all] [--log FILE]
+  redfilade client-report FILE [--sarif FILE] [--out DIR]
+  redfilade defend --defence-image IMAGE [--min-block-rate R] [--max-false-positive-rate R]
+
+Scenario packs and maintenance:
+  redfilade scenario validate [DIR...]
+  redfilade pack digest DIR | verify DIR
+  redfilade triage summarize DIR
+  redfilade version
 
 Scenarios built into Redfilade run by id. A directory is an external pack:
-it must carry a valid signature, or be run with --allow-unsigned and its id
-confirmed. Non-interactive runs must also list the pack's exact digest with
---allow-digest or --allowlist FILE.
+it must carry a valid signature, or be run with --allow-unsigned --confirm ID.
+Non-interactive runs must also list the pack's exact digest with
+--allow-digest DIGEST or --allowlist FILE.
 
 Targets always run in an isolated container cell, never directly on your
 machine. Only test servers you own or are authorised to test.
@@ -444,10 +449,12 @@ func cmdRangeRun(ctx context.Context, args []string, stdin io.Reader, stdout, st
 		return exitError
 	}
 	summary(stdout, m.ID+" ["+*build+"]", ev)
-	if _, err := writeFile(c.out, "evidence-"+m.ID+"-"+*build+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) }); err != nil {
+	path, err := writeFile(c.out, "evidence-"+m.ID+"-"+*build+".json", func(w io.Writer) error { return report.WriteEvidence(w, ev) })
+	if err != nil {
 		fmt.Fprintln(stderr, "redfilade:", err)
 		return exitError
 	}
+	explain(stdout, t, *build, ev, path)
 	switch ev.Oracle.Verdict {
 	case oracle.Exploited:
 		return exitFindings
@@ -493,14 +500,21 @@ func cmdRangeGate(ctx context.Context, args []string, stdin io.Reader, stdout, s
 		targets = append(targets, t)
 	}
 	o, tier := opts(ctx, runner, c)
+	var gate consent.GatePlan
+	for _, t := range targets {
+		for _, build := range []string{"vulnerable", "secure"} {
+			gate.Plans = append(gate.Plans, scenarioPlan(t.m, build, tier, t, c))
+		}
+	}
+	if !approve(gate, c, stdin, stdout, stderr) {
+		return exitError
+	}
+	fmt.Fprintln(stdout)
 	var cases []report.Case
 	failed := false
 	for _, t := range targets {
 		m := t.m
 		for _, build := range []string{"vulnerable", "secure"} {
-			if !approve(scenarioPlan(m, build, tier, t, c), c, stdin, stdout, stderr) {
-				return exitError
-			}
 			ev, err := runScenario(ctx, m, build, o, c)
 			if err != nil {
 				fmt.Fprintln(stderr, "redfilade:", err)
@@ -581,6 +595,7 @@ func cmdTest(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		if a.Network == "sink" {
 			p.Network = "sink"
 		}
+		p.Attacks = append(p.Attacks, a.ID)
 	}
 	if !approve(p, c, stdin, stdout, stderr) {
 		return exitError
@@ -1035,7 +1050,7 @@ func cmdDefend(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		case ev.Oracle.Verdict == oracle.Inconclusive:
 			state = "inconclusive"
 		}
-		fmt.Fprintf(stdout, "  %-24s %s  %-12s (%d messages blocked)\n", m.ID, m.Level, state, len(a.Blocked))
+		fmt.Fprintf(stdout, "  %-24s %s  %-12s (%s blocked)\n", m.ID, m.Level, state, plural(len(a.Blocked), "message"))
 		rep.Attacks = append(rep.Attacks, a)
 	}
 	fmt.Fprintln(stdout, "\nBenign tasks on secure twins:")
@@ -1095,4 +1110,104 @@ func cmdDefend(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 		return exitFindings
 	}
 	return exitPass
+}
+
+func plural(n int, word string) string {
+	if n == 1 {
+		return "1 " + word
+	}
+	return fmt.Sprintf("%d %ss", n, word)
+}
+
+// explain tells a learner what a single range run showed. The scenario's own
+// summary is shown only for built-in scenarios: a pack's free text is author
+// input and stays out of the terminal (ADR-0015).
+func explain(w io.Writer, t *target, build string, ev *report.Evidence, path string) {
+	fmt.Fprintln(w)
+	if t.origin == "built-in" {
+		fmt.Fprintln(w, "About this scenario")
+		for _, l := range wrap(report.Clean(t.m.Summary, 600), 72) {
+			fmt.Fprintln(w, "  "+l)
+		}
+		fmt.Fprintln(w)
+	}
+	switch ev.Oracle.Verdict {
+	case oracle.Exploited:
+		fmt.Fprintf(w, "What the attack achieved against the %s build\n", build)
+		for _, f := range ev.Oracle.Findings {
+			fmt.Fprintln(w, "  - "+describe(f))
+		}
+	case oracle.NotExploited:
+		fmt.Fprintf(w, "The %s build held: none of the attack's goals were observed.\n", build)
+	default:
+		fmt.Fprintln(w, "The run was inconclusive: the target did not finish the session, so nothing can be concluded.")
+	}
+	if len(ev.Oracle.NotObserved) > 0 {
+		fmt.Fprintln(w, "\nWhat Redfilade could not see in this run")
+		for _, n := range ev.Oracle.NotObserved {
+			fmt.Fprintln(w, "  - "+report.Clean(n, 200))
+		}
+	}
+	other := "secure"
+	if build == "secure" {
+		other = "vulnerable"
+	}
+	fmt.Fprintf(w, "\nEvidence (every message, redacted): %s\n", path)
+	if t.origin == "built-in" {
+		fmt.Fprintf(w, "Compare with the other twin:        redfilade range run %s --build %s\n", t.m.ID, other)
+	}
+}
+
+// describe turns one finding into a sentence. Excerpts come from the target
+// and are cleaned and cut short before printing.
+func describe(f oracle.Finding) string {
+	var s string
+	switch f.Fact {
+	case "canary_leaked":
+		s = "the secret " + f.Canary + " was sent back to the attacker"
+	case "world_file_changed":
+		s = "the file " + f.Path + " was changed"
+	case "sensitive_file_read":
+		s = "a sensitive file was read"
+	case "egress_reached_sink":
+		s = "the server made a request to an attacker-chosen address (caught by the sink)"
+	case "internals_leaked":
+		s = "the server leaked internal details (" + f.Detector + ")"
+	case "tool_metadata_flagged":
+		s = "a tool description carries hidden instructions for the AI model"
+	case "output_injection_flagged":
+		s = "a tool result carries instructions aimed at the AI model"
+	case "agent_leaked_canary":
+		s = "the AI agent was steered into sending a secret out through a tool call"
+	default:
+		s = strings.ReplaceAll(f.Fact, "_", " ")
+	}
+	if f.Path != "" && f.Fact != "world_file_changed" {
+		s += " (" + f.Path + ")"
+	}
+	s = report.Clean(s, 300)
+	if e := report.Clean(f.Excerpt, 90); e != "" && f.Fact != "world_file_changed" {
+		s += "\n      seen: " + e
+	}
+	return s
+}
+
+func wrap(s string, width int) []string {
+	var lines []string
+	var cur string
+	for _, word := range strings.Fields(s) {
+		if cur != "" && len(cur)+1+len(word) > width {
+			lines = append(lines, cur)
+			cur = word
+			continue
+		}
+		if cur != "" {
+			cur += " "
+		}
+		cur += word
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
 }

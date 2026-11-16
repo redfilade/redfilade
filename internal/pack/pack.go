@@ -126,7 +126,7 @@ func Decide(m *scenario.Manifest, digest, sig string, p Policy) error {
 			return fmt.Errorf("%w: %s is %s; pass --allow-unsigned and confirm the pack id to run it anyway", ErrRefused, m.ID, sig)
 		}
 		if p.Confirm != m.ID {
-			return fmt.Errorf("%w: to run unsigned pack %s, confirm its id exactly (got %q)", ErrRefused, m.ID, p.Confirm)
+			return fmt.Errorf("%w: to run unsigned pack %s, confirm its id: type it when asked, or pass --confirm %s (got %q)", ErrRefused, m.ID, m.ID, p.Confirm)
 		}
 	}
 	if !p.Interactive && !p.AllowedDigests[digest] {
