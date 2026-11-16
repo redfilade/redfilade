@@ -50,8 +50,6 @@ step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a, pnpm/actio
 
 The last two are actions the OSV reusable workflows call internally, at their own pinned commit. When Renovate bumps the OSV workflow pin, a startup failure on `osv-scanner` names any new internal pins to add. Edit the list on the **organisation** settings page; the repository page only shows it.
 
-The last two are actions the OSV reusable workflows call internally.
-
 When Renovate bumps a pin, update this list in the same review.
 
 ### D. Install Renovate

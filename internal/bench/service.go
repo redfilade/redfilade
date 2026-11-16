@@ -243,6 +243,10 @@ func (s *Service) postRun(w http.ResponseWriter, r *http.Request, p *Principal) 
 		return
 	}
 	if _, err := s.Verifier.AuthorizeRecords(r.Context(), u.Hostname(), recs); err != nil {
+		if errors.Is(err, domain.ErrNotVerified) {
+			writeErr(w, 403, "domain not verified: "+u.Hostname()+" (POST /v1/domains, publish the proof, then POST /v1/domains/{domain}/verify)")
+			return
+		}
 		writeErr(w, 403, err.Error())
 		return
 	}
