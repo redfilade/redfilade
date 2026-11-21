@@ -4,7 +4,8 @@
 
 <p align="center">
   <strong>The MCP red-team range.</strong><br>
-  Break it here, so nobody breaks it out there.
+  Break it here, so nobody breaks it out there.<br>
+  <a href="https://redfilade.github.io/redfilade/">Website</a> · <a href="https://redfilade.github.io/redfilade/#docs">Docs</a> · <a href="https://redfilade.github.io/redfilade/#blog">Blog</a>
 </p>
 
 <p align="center">
@@ -190,6 +191,7 @@ scenarios/          Built-in scenarios: data-only manifests (ADR-0013)
 targets/            Vulnerable and secure twins, built into FROM-scratch images
 action.yml          GitHub Action
 db/migrations/      Multi-tenant Postgres schema with row-level security
+docs/index.html     Website and one-page docs, served by GitHub Pages from docs/ (no build step, no workflow)
 docs/adr/           Architecture Decision Records 0001 to 0024
 docs/threat-model/  STRIDE threat model
 harness/            Attack harness and scenario SDK (Python)
