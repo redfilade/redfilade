@@ -1,6 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><style>
 @font-face{font-family:FRB;src:url(fredoka-latin-700-normal.woff2)}
-@font-face{font-family:NUN;src:url(nunito-latin-800-normal.woff2)}
+@font-face{font-family:NUN;src:url(nunito-latin-800-normal.woff2);font-weight:800}
+@font-face{font-family:NUN;src:url(nunito-latin-600-normal.woff2);font-weight:600}
 html,body{margin:0;overflow:hidden}
 #s{position:relative;background-size:cover}
 .word{position:absolute;font-family:FRB;letter-spacing:-.005em;line-height:1;white-space:nowrap;font-feature-settings:'liga' 0}
@@ -8,14 +9,27 @@ html,body{margin:0;overflow:hidden}
  filter:drop-shadow(0 2px 0 #B01E27) drop-shadow(0 2px 0 #A11B23) drop-shadow(0 2px 0 #921820) drop-shadow(0 2px 0 #84151C) drop-shadow(0 2px 0 #6E1217) drop-shadow(0 14px 22px rgba(229,56,59,.5))}
 .cream{background:linear-gradient(180deg,#FFFFFF 0%,#F7F1E8 45%,#D9D1C4 100%);-webkit-background-clip:text;color:transparent;
  filter:drop-shadow(0 2px 0 #BDB4A6) drop-shadow(0 2px 0 #A9A092) drop-shadow(0 2px 0 #958C7F) drop-shadow(0 2px 0 #81796C) drop-shadow(0 2px 0 #635C52) drop-shadow(0 14px 22px rgba(0,0,0,.55))}
-.tag{position:absolute;font-family:NUN;color:#E9E3D9;letter-spacing:.2em;text-transform:uppercase;white-space:nowrap}
+.tag{position:absolute;font-family:NUN;font-weight:800;color:#E9E3D9;letter-spacing:.2em;text-transform:uppercase;white-space:nowrap}
 .tag b{color:#F2484B;font-weight:inherit}
+.desc{position:absolute;font-family:NUN;font-weight:600;color:#D9D3CA;line-height:1.38}
+.desc b{color:#FFFFFF;font-weight:800}
+.chips{position:absolute;display:flex;flex-wrap:wrap}
+.chips span{font-family:NUN;font-weight:800;color:#F4EFE6;background:rgba(16,20,28,.62);border:1.5px solid rgba(242,72,75,.45);border-radius:999px;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.35)}
+.chips span i{display:inline-block;border-radius:50%;background:#F2484B;box-shadow:0 0 10px #F2484B;vertical-align:middle}
+.foot{position:absolute;font-family:NUN;font-weight:800;color:#A9A2B0;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap}
+.foot b{color:#F2484B;font-weight:inherit}
 </style></head><body><div id="s"></div>
 <script>
+// Social preview and README banner. The mascot scene comes from compose.py; this page draws the text over it.
 const q=new URLSearchParams(location.search), m=q.get('mode');
-const L={social:{W:1280,H:640,bg:'bg_social.png',x:610,y:205,fs:138,ts:27,ty:395},
-         banner:{W:1600,H:520,bg:'bg_banner.png',x:690,y:140,fs:168,ts:33,ty:350}}[m];
+const L={social:{W:1280,H:640,bg:'bg_social.png',x:560,y:70,fs:118,ts:24,ty:212,ds:25,dy:262,dw:660,cy:388,cs:19,cg:12,fy:560,fz:15},
+         banner:{W:1600,H:520,bg:'bg_banner.png',x:690,y:38,fs:116,ts:24,ty:176,ds:24,dy:220,dw:860,cy:316,cs:18,cg:12,fy:458,fz:15}}[m];
 const s=document.getElementById('s'); s.style.width=L.W+'px'; s.style.height=L.H+'px'; s.style.backgroundImage=`url(${L.bg})`;
+const pad=`${Math.round(L.cs*.5)}px ${Math.round(L.cs*.95)}px`, dot=Math.round(L.cs*.42);
+const chip=t=>`<span style="font-size:${L.cs}px;padding:${pad};margin:0 ${L.cg}px ${L.cg}px 0"><i style="width:${dot}px;height:${dot}px;margin-right:${Math.round(L.cs*.5)}px"></i>${t}</span>`;
 s.innerHTML=`<div class="word" style="left:${L.x}px;top:${L.y}px;font-size:${L.fs}px"><span class="red">Red</span><span class="cream">filade</span></div>
-<div class="tag" style="left:${L.x+L.fs*0.03}px;top:${L.ty}px;font-size:${L.ts}px">Open MCP <b>red-team</b> range</div>`;
+<div class="tag" style="left:${L.x+L.fs*0.03}px;top:${L.ty}px;font-size:${L.ts}px">MCP <b>red-team</b> range</div>
+<div class="desc" style="left:${L.x+L.fs*0.03}px;top:${L.dy}px;width:${L.dw}px;font-size:${L.ds}px">Attack the <b>MCP tools your AI agents use</b> inside a sealed cell, and <b>prove from observed facts</b> whether the attack worked.</div>
+<div class="chips" style="left:${L.x+L.fs*0.03}px;top:${L.cy}px;width:${L.dw}px">${chip('Vulnerable + secure twins')}${chip('Sealed cells')}${chip('Proof, not guesses')}${chip('Servers · clients · guardrails')}</div>
+<div class="foot" style="left:${L.x+L.fs*0.03}px;top:${L.fy}px;font-size:${L.fz}px">L1–L5 tests · SARIF · JUnit · <b>free for internal testing</b></div>`;
 </script></body></html>

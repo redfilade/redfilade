@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="Redfilade: the MCP red-team range. A small hooded robot mascot with glowing red eyes beside the Redfilade wordmark." src="assets/brand/redfilade-banner.png" width="100%">
+  <img alt="Redfilade, the MCP red-team range: attack the MCP tools your AI agents use inside a sealed cell, and prove from observed facts whether the attack worked. Vulnerable and secure twins, sealed cells, proof not guesses, for servers, clients and guardrails." src="assets/brand/redfilade-banner.png" width="100%">
 </p>
 
 <p align="center">
