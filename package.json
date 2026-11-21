@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/redfilade/redfilade.git"
   },
-  "packageManager": "pnpm@10.28.0",
+  "packageManager": "pnpm@10.34.9",
   "engines": {
     "node": ">=22",
     "pnpm": ">=10.28.0"
