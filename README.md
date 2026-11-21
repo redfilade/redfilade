@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: PolyForm Noncommercial or Internal Use" src="https://img.shields.io/badge/license-noncommercial%20%7C%20internal%20use-E5383B"></a>
-  <img alt="Status: Phase 2" src="https://img.shields.io/badge/status-phase%202%20%C2%B7%20the%20range-10141C">
+  <img alt="Status: early, phases 1, 2 and 4 built" src="https://img.shields.io/badge/status-early%20%C2%B7%20phases%201%2C%202%2C%204%20built-10141C">
   <a href="DISCLAIMER.md"><img alt="Authorised use only" src="https://img.shields.io/badge/use-authorised%20targets%20only-10141C"></a>
   <a href="SECURITY.md"><img alt="Report a vulnerability privately" src="https://img.shields.io/badge/security-private%20reporting-10141C"></a>
 </p>
@@ -19,6 +19,15 @@
 > [!CAUTION]
 > **Read [`DISCLAIMER.md`](DISCLAIMER.md) before you clone, build or run anything.**
 > Redfilade contains deliberately vulnerable code and attack code. Use it only against its own practice targets, or against systems you own or have written permission to test. **You alone are responsible for how you use it.** The maintainers and contributors accept no responsibility for any use or misuse, by anyone, anywhere. We also **cannot promise this repository has not been compromised**, so [verify it before you run it](#verify-before-you-run).
+
+## In short
+
+| | |
+|---|---|
+| **Repository** | Public on GitHub, so anyone can read and verify every line. Public does not mean open source. |
+| **Licence** | Source-available and free. Use it to learn, research and **test MCP servers and clients you own or are authorised to test**, including inside a commercial company. |
+| **Not allowed** | Selling it, hosting it for others, or building a product or service on its code. |
+| **Responsibility** | Yours alone. Verify the code before you run it. |
 
 ## What is Redfilade?
 
@@ -34,7 +43,7 @@ It works like a shooting range for MCP security:
 An attack discovered in the Range becomes a test that anyone can run against an MCP server **they own**.
 
 > [!NOTE]
-> **Redfilade is early (Phase 2).** The Range runs L1 and L2 attacks end to end with an egress trap, signed scenario packs and a review lane for contributed attacks. Hosted features are not built yet. See the [roadmap](#roadmap).
+> **Redfilade is early.** The Range runs L1 to L5 checks locally: practice twins with an egress trap, signed scenario packs, a review lane for contributed attacks, client tests and defence scoring. A first hosted Test Bench for remote L1 and L2 tests exists, using organisation API keys; OAuth sign-in and hosted Range cells are not built yet. Nothing has been formally released. See the [roadmap](#roadmap).
 
 ## Who it is for
 
@@ -109,9 +118,11 @@ Full guide: [`docs/range.md`](docs/range.md).
 
 Each one has a vulnerable twin, a secure twin and an automated check that the first is exploited and the second holds.
 
-## Where Cisco comes in
+## Third-party detection rules (Cisco MCP Scanner)
 
-Redfilade reuses one part of [Cisco's MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner): its **detection rules**. Nothing else.
+Redfilade reuses one part of the open-source [MCP Scanner](https://github.com/cisco-ai-defense/mcp-scanner) published by Cisco: its **detection rules**. Nothing else.
+
+> Redfilade is an independent project. It is **not affiliated with, sponsored by or endorsed by Cisco Systems, Inc.** "Cisco" is a trademark of Cisco Systems, Inc. and is used here only to identify the source of the rules.
 
 | | |
 |---|---|
@@ -120,7 +131,7 @@ Redfilade reuses one part of [Cisco's MCP Scanner](https://github.com/cisco-ai-d
 | **How they run** | Inside Redfilade's own Go engine ([`internal/rules`](internal/rules/)), tested to give exactly the same results as the official YARA engine on Cisco's test cases. Cisco's code never runs |
 | **What you need** | **Nothing extra.** The rules are built into the `redfilade` binary. No Cisco account, API key, Python, YARA or internet connection is needed, and nothing is sent to Cisco |
 | **What we do not use** | Cisco's scanner program, its cloud, AI-model and VirusTotal analysers, and its example malicious servers |
-| **License** | The rules stay under the Apache License 2.0 with Cisco's copyright ([`LICENSE`](internal/rules/cisco/LICENSE), [`SOURCE.md`](internal/rules/cisco/SOURCE.md)). Cisco does not endorse Redfilade |
+| **License** | The rules stay under the Apache License 2.0 with Cisco's copyright and notices unchanged ([`LICENSE`](internal/rules/cisco/LICENSE), [`SOURCE.md`](internal/rules/cisco/SOURCE.md)). Redfilade's own licence does not apply to them |
 | **Updates** | Maintainers only: copy the new rules, refresh the checksums, regenerate the test corpus with [`scripts/cisco-rules-golden.py`](scripts/cisco-rules-golden.py) (needs `yara-python`), and review every change. See [ADR-0018](docs/adr/0018-reuse-cisco-mcp-scanner-rules.md) |
 
 A rule match is a strong warning sign, not proof of intent: every report names the rule that fired and shows the matching text.
@@ -160,10 +171,10 @@ Today a cell is a hardened container: no network or a private trap network, read
 
 ## Roadmap
 
-- [ ] **Phase 0: Foundation.** Hardened organisation, pinned least-privilege CI, secret scanning, dependency policy, threat model, multi-tenant schema, a proven signed dry-run release. Done, including the signed `0.0.1` dry run; remaining org settings (rulesets, action allow-list, Renovate) in [`docs/phase-0.md`](docs/phase-0.md).
+- [ ] **Phase 0: Foundation.** Hardened organisation, pinned least-privilege CI, secret scanning, dependency policy, threat model, multi-tenant schema, a proven signed dry-run release. Built, including the signed `0.0.1` dry run; a few organisation settings (2FA confirmation, ruleset import, action allow-list, Renovate) are still open in [`docs/phase-0.md`](docs/phase-0.md).
 - [x] **Phase 1: Walking skeleton.** One attack against a vulnerable and a secure twin, judged by the oracle, with a signed report. [`docs/phase-1.md`](docs/phase-1.md)
 - [x] **Phase 2: The real Range.** The L2 battery, signed scenario packs with a consent gate, and the triage lane for contributed attacks. [`docs/phase-2.md`](docs/phase-2.md)
-- [x] **Phase 3: Hosted Test Bench.** HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and the hosted service for remote tests ([`docs/bench.md`](docs/bench.md)). OAuth sign-in and hosted Range cells follow. Tracked in [`docs/phase-3.md`](docs/phase-3.md).
+- [ ] **Phase 3: Hosted Test Bench.** Built: HTTP transport and HTTP checks, domain verification and remote targets, L3 agent-in-the-loop, and a first hosted service for remote L1 and L2 tests ([`docs/bench.md`](docs/bench.md)). Still to come: OAuth and SSO sign-in, and hosted Range cells (they need the microVM platform). Tracked in [`docs/phase-3.md`](docs/phase-3.md).
 - [x] **Phase 4: Clients and defences.** L4 hostile server for testing MCP clients and hosts, and L5 measurement of gateways and guardrails against every scenario and a benign task set. Tracked in [`docs/phase-4.md`](docs/phase-4.md).
 
 ## Repository layout
@@ -199,7 +210,7 @@ New attack ideas are especially welcome. Start with [`CONTRIBUTING.md`](CONTRIBU
 
 ## License and terms
 
-Redfilade is **source-available** and free. You choose one of two licenses ([`LICENSE`](LICENSE)):
+Redfilade is **source-available** and free, and this repository is public so its code can be read and checked. In one line: **use it to check and test, never to build or sell a product.** You choose one of two licenses ([`LICENSE`](LICENSE)):
 
 | You want to | License to use | Allowed |
 |---|---|---|
@@ -214,4 +225,4 @@ Redfilade is **source-available** and free. You choose one of two licenses ([`LI
 
 Versions published before this change remain under the Apache License 2.0 they were released with.
 
-**Third-party code.** The detection rules in `internal/rules/cisco/` come from Cisco's MCP Scanner and remain under the Apache License 2.0. See [Where Cisco comes in](#where-cisco-comes-in).
+**Third-party code.** The detection rules in `internal/rules/cisco/` come from Cisco's MCP Scanner and remain under the Apache License 2.0. Redfilade is not affiliated with or endorsed by Cisco. See [Third-party detection rules](#third-party-detection-rules-cisco-mcp-scanner).
